@@ -25,6 +25,7 @@ wheels/
 venv/
 ENV/
 env/
+old/
 
 # uv
 .uv/

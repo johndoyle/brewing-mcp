@@ -518,11 +518,37 @@ class BeerSmithParser:
         return None
 
     def get_age_profiles(self) -> list[AgeProfile]:
-        """Get all fermentation/aging profiles."""
-        root = self._parse_xml_file("Age.bsmx")
-        if root is None:
+        """Get all fermentation/aging profiles.
+
+        Note: Age.bsmx has a non-standard XML structure with multiple root elements.
+        Standard profiles are in <Selections><Data>, user-defined profiles are sibling roots.
+        """
+        # Special handling for Age.bsmx with multiple root elements
+        filepath = self.beersmith_path / "Age.bsmx"
+        if not filepath.exists():
             return []
+
+        with open(filepath, "r", encoding="utf-8", errors="replace") as f:
+            content = f.read()
+
+        # Replace HTML entities
+        for entity, replacement in HTML_ENTITIES.items():
+            content = content.replace(entity, replacement)
+        content = re.sub(r'&#(\d+);', lambda m: chr(int(m.group(1))), content)
+        content = re.sub(r'&#x([0-9a-fA-F]+);', lambda m: chr(int(m.group(1), 16)), content)
+
+        # Wrap in fake root to handle multiple root elements
+        wrapped_content = f"<root>{content}</root>"
+
+        try:
+            parser = etree.XMLParser(recover=True, encoding='utf-8')
+            root = etree.fromstring(wrapped_content.encode('utf-8'), parser=parser)
+        except etree.XMLSyntaxError:
+            return []
+
         profiles = []
+
+        # Parse standard age profiles from within <Data> elements
         for data in root.iter("Data"):
             for age_elem in data.findall("Age"):
                 try:
@@ -531,6 +557,26 @@ class BeerSmithParser:
                     profiles.append(age)
                 except Exception:
                     pass
+
+        # Parse user-defined age profiles at root level
+        # BeerSmith stores version history, so we may see duplicates - keep the last one
+        user_profiles = {}
+        for age_elem in root.findall("Age"):
+            # Skip age elements that are inside <Data> (already processed above)
+            # We only want direct children of our fake root
+            parent = age_elem.getparent()
+            if parent is not None and parent.tag == "Data":
+                continue
+            try:
+                age_dict = self._element_to_dict(age_elem)
+                age = AgeProfile.model_validate(age_dict)
+                # Use name as key - last occurrence wins
+                user_profiles[age.name] = age
+            except Exception:
+                pass
+
+        profiles.extend(user_profiles.values())
+
         return sorted(profiles, key=lambda a: a.name)
 
     def get_age_profile(self, name: str) -> AgeProfile | None:

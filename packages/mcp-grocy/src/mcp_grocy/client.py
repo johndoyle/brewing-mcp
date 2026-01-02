@@ -246,6 +246,46 @@ class GrocyClient:
             json={"amount": amount},
         )
 
+    async def get_product_by_barcode(self, barcode: str) -> dict[str, Any]:
+        """
+        Look up a product by barcode.
+
+        Args:
+            barcode: Product barcode
+
+        Returns:
+            Product details with stock information
+        """
+        return await self._request("GET", f"/stock/products/by-barcode/{barcode}")
+
+    async def get_product_stock_entries(self, product_id: int) -> list[dict[str, Any]]:
+        """
+        Get all stock entries for a product.
+
+        Args:
+            product_id: Product ID
+
+        Returns:
+            List of stock entries with details (purchase date, price, location, etc.)
+        """
+        return await self._request("GET", f"/stock/products/{product_id}/entries")
+
+    async def add_expired_products_to_shopping_list(self, list_id: int = 1) -> None:
+        """Add all expired products to shopping list."""
+        await self._request(
+            "POST",
+            "/stock/shoppinglist/add-expired-products",
+            json={"list_id": list_id},
+        )
+
+    async def add_overdue_products_to_shopping_list(self, list_id: int = 1) -> None:
+        """Add all overdue products to shopping list."""
+        await self._request(
+            "POST",
+            "/stock/shoppinglist/add-overdue-products",
+            json={"list_id": list_id},
+        )
+
     # ==================== Shopping List ====================
 
     async def get_shopping_list(self, list_id: int | None = None) -> list[dict[str, Any]]:

@@ -50,6 +50,7 @@ dmypy.json
 .idea/
 .github/
 .vscode/
+.claude/
 *.swp
 *.swo
 *~

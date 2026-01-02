@@ -371,6 +371,134 @@ def register_tools(mcp: FastMCP) -> None:
             "amount_opened": amount,
         }
 
+    @mcp.tool()
+    async def get_product_by_barcode(barcode: str) -> dict | None:
+        """
+        Look up a product by its barcode.
+
+        Args:
+            barcode: Product barcode to search
+
+        Returns product details with stock info, or None if not found.
+        """
+        client = _get_client()
+        try:
+            result = await client.get_product_by_barcode(barcode)
+            return {
+                "product_id": result.get("product", {}).get("id"),
+                "product_name": result.get("product", {}).get("name"),
+                "barcode": barcode,
+                "stock_amount": result.get("stock_amount"),
+                "stock_amount_opened": result.get("stock_amount_opened"),
+                "product": result.get("product"),
+            }
+        except Exception:
+            return None
+
+    @mcp.tool()
+    async def get_product_entries(name: str) -> list[dict]:
+        """
+        Get all stock entries for a product (purchase history).
+
+        Args:
+            name: Product name
+
+        Returns list of stock entries with purchase dates, prices, locations, etc.
+        """
+        client = _get_client()
+
+        products = await client.get_products()
+        name_lower = name.lower()
+
+        matched = None
+        for p in products:
+            if name_lower in p.get("name", "").lower():
+                matched = p
+                break
+
+        if not matched:
+            return []
+
+        entries = await client.get_product_stock_entries(matched["id"])
+        locations = await client.get_locations()
+        loc_map = {loc["id"]: loc.get("name") for loc in locations}
+
+        return [
+            {
+                "id": e.get("id"),
+                "amount": e.get("amount"),
+                "best_before_date": e.get("best_before_date"),
+                "purchased_date": e.get("purchased_date"),
+                "price": e.get("price"),
+                "location": loc_map.get(e.get("location_id"), "Unknown"),
+                "open": e.get("open", 0) == 1,
+                "note": e.get("note"),
+            }
+            for e in entries
+        ]
+
+    @mcp.tool()
+    async def match_product_by_name(
+        name: str,
+        threshold: float = 70.0,
+    ) -> dict | None:
+        """
+        Find the best matching product using fuzzy string matching.
+
+        Args:
+            name: Product name to search for
+            threshold: Minimum match score (0-100) required
+
+        Returns best matching product with confidence score, or None if no match.
+        """
+        client = _get_client()
+        products = await client.get_products()
+
+        if not products:
+            return None
+
+        name_lower = name.lower()
+        best_match = None
+        best_score = 0
+
+        for p in products:
+            product_name = p.get("name", "").lower()
+
+            # Exact match
+            if name_lower == product_name:
+                return {
+                    "product": p,
+                    "score": 100.0,
+                    "match_type": "exact",
+                }
+
+            # Contains match
+            if name_lower in product_name or product_name in name_lower:
+                score = 90.0 if name_lower in product_name else 80.0
+                if score > best_score:
+                    best_score = score
+                    best_match = p
+
+            # Word overlap scoring
+            name_words = set(name_lower.split())
+            product_words = set(product_name.split())
+            overlap = len(name_words & product_words)
+            total = len(name_words | product_words)
+            if total > 0:
+                word_score = (overlap / total) * 100
+                if word_score > best_score:
+                    best_score = word_score
+                    best_match = p
+
+        if best_match and best_score >= threshold:
+            return {
+                "product": best_match,
+                "score": best_score,
+                "match_type": "fuzzy",
+            }
+
+        return None
+
     # ==================== Shopping List ====================
 
     @mcp.tool()
@@ -475,6 +603,68 @@ def register_tools(mcp: FastMCP) -> None:
         client = _get_client()
         await client.add_missing_products_to_shopping_list()
         return {"success": True, "message": "Missing products added to shopping list"}
+
+    @mcp.tool()
+    async def add_expired_products_to_shopping_list() -> dict:
+        """
+        Add all expired products to the shopping list.
+
+        This is useful for quickly identifying and replacing expired stock.
+
+        Returns confirmation.
+        """
+        client = _get_client()
+        await client.add_expired_products_to_shopping_list()
+        return {"success": True, "message": "Expired products added to shopping list"}
+
+    @mcp.tool()
+    async def bulk_add_to_shopping_list(items: list[dict]) -> dict:
+        """
+        Add multiple items to the shopping list at once.
+
+        Args:
+            items: List of items, each with 'name' (product name) and 'amount',
+                   optionally 'note'
+
+        Returns summary of added items.
+        """
+        client = _get_client()
+        products = await client.get_products()
+        product_map = {p.get("name", "").lower(): p for p in products}
+
+        added = []
+        not_found = []
+
+        for item in items:
+            name = item.get("name", "")
+            amount = item.get("amount", 1)
+            note = item.get("note")
+
+            # Find product
+            name_lower = name.lower()
+            matched = product_map.get(name_lower)
+            if not matched:
+                for pname, prod in product_map.items():
+                    if name_lower in pname:
+                        matched = prod
+                        break
+
+            if matched:
+                await client.add_to_shopping_list(
+                    product_id=matched["id"],
+                    amount=amount,
+                    note=note,
+                )
+                added.append({"name": matched.get("name"), "amount": amount})
+            else:
+                not_found.append(name)
+
+        return {
+            "success": True,
+            "added": added,
+            "not_found": not_found,
+            "total_added": len(added),
+        }
 
     # ==================== Recipes ====================
 
@@ -649,6 +839,152 @@ def register_tools(mcp: FastMCP) -> None:
             "message": "Missing ingredients added to shopping list",
         }
 
+    @mcp.tool()
+    async def create_recipe_with_ingredients(
+        name: str,
+        ingredients: list[dict],
+        description: str | None = None,
+        servings: int = 1,
+    ) -> dict:
+        """
+        Create a new recipe with ingredients in one operation.
+
+        Args:
+            name: Recipe name
+            ingredients: List of ingredients, each with:
+                - name: Product name
+                - amount: Amount required
+                - note: Optional note
+            description: Recipe description
+            servings: Number of servings (default 1)
+
+        Returns created recipe with ingredient status.
+        """
+        client = _get_client()
+
+        # Create the recipe first
+        recipe_data = {
+            "name": name,
+            "base_servings": servings,
+        }
+        if description:
+            recipe_data["description"] = description
+
+        recipe_result = await client.create_recipe(recipe_data)
+        recipe_id = recipe_result.get("created_object_id")
+
+        if not recipe_id:
+            return {"error": "Failed to create recipe"}
+
+        # Get products for matching
+        products = await client.get_products()
+        product_map = {p.get("name", "").lower(): p for p in products}
+
+        added_ingredients = []
+        not_found_ingredients = []
+
+        for ing in ingredients:
+            ing_name = ing.get("name", "")
+            amount = ing.get("amount", 1)
+            note = ing.get("note")
+
+            # Find matching product
+            name_lower = ing_name.lower()
+            matched = product_map.get(name_lower)
+            if not matched:
+                for pname, prod in product_map.items():
+                    if name_lower in pname or pname in name_lower:
+                        matched = prod
+                        break
+
+            if matched:
+                await client.add_recipe_ingredient(
+                    recipe_id=recipe_id,
+                    product_id=matched["id"],
+                    amount=amount,
+                    note=note,
+                )
+                added_ingredients.append({
+                    "name": matched.get("name"),
+                    "amount": amount,
+                })
+            else:
+                not_found_ingredients.append(ing_name)
+
+        return {
+            "success": True,
+            "recipe_id": recipe_id,
+            "recipe_name": name,
+            "ingredients_added": added_ingredients,
+            "ingredients_not_found": not_found_ingredients,
+        }
+
+    @mcp.tool()
+    async def get_recipe_with_stock_status(name_or_id: str | int) -> dict | None:
+        """
+        Get recipe with complete stock status for all ingredients.
+
+        Args:
+            name_or_id: Recipe name or ID
+
+        Returns recipe with fulfillment status and stock levels for each ingredient.
+        """
+        client = _get_client()
+        recipes = await client.get_recipes()
+
+        matched = None
+        if isinstance(name_or_id, int) or (isinstance(name_or_id, str) and name_or_id.isdigit()):
+            recipe_id = int(name_or_id)
+            matched = next((r for r in recipes if r["id"] == recipe_id), None)
+        else:
+            name_lower = str(name_or_id).lower()
+            for r in recipes:
+                if name_lower in r.get("name", "").lower():
+                    matched = r
+                    break
+
+        if not matched:
+            return None
+
+        # Get ingredients
+        positions = await client.get_recipe_positions(matched["id"])
+        products = await client.get_products()
+        product_map = {p["id"]: p for p in products}
+
+        # Get current stock
+        stock = await client.get_stock()
+        stock_map = {s.get("product_id"): s for s in stock}
+
+        # Get fulfillment
+        fulfillment = await client.get_recipe_fulfillment(matched["id"])
+
+        ingredients_status = []
+        for pos in positions:
+            product_id = pos.get("product_id")
+            product = product_map.get(product_id, {})
+            stock_item = stock_map.get(product_id, {})
+
+            required = pos.get("amount", 0)
+            in_stock = stock_item.get("amount", 0)
+
+            ingredients_status.append({
+                "product": product.get("name", "Unknown"),
+                "required": required,
+                "in_stock": in_stock,
+                "missing": max(0, required - in_stock),
+                "fulfilled": in_stock >= required,
+            })
+
+        return {
+            "id": matched.get("id"),
+            "name": matched.get("name"),
+            "description": matched.get("description"),
+            "servings": matched.get("base_servings"),
+            "is_fulfilled": fulfillment.get("recipe_fulfillment") == 1,
+            "missing_products_count": fulfillment.get("missing_products_count", 0),
+            "ingredients": ingredients_status,
+        }
+
     # ==================== Chores ====================
 
     @mcp.tool()
@@ -670,6 +1006,44 @@ def register_tools(mcp: FastMCP) -> None:
             }
             for c in chores
         ]
+
+    @mcp.tool()
+    async def get_chore_details(name_or_id: str | int) -> dict | None:
+        """
+        Get detailed information about a specific chore.
+
+        Args:
+            name_or_id: Chore name or ID
+
+        Returns chore details including next execution, history, etc.
+        """
+        client = _get_client()
+        chores = await client.get_chores()
+
+        matched = None
+        if isinstance(name_or_id, int) or (isinstance(name_or_id, str) and name_or_id.isdigit()):
+            chore_id = int(name_or_id)
+            matched = next((c for c in chores if c["id"] == chore_id), None)
+        else:
+            name_lower = str(name_or_id).lower()
+            for c in chores:
+                if name_lower in c.get("name", "").lower():
+                    matched = c
+                    break
+
+        if not matched:
+            return None
+
+        # Get detailed chore info
+        chore_details = await client.get_chore(matched["id"])
+        return {
+            "id": matched.get("id"),
+            "name": matched.get("name"),
+            "description": matched.get("description"),
+            "period_type": matched.get("period_type"),
+            "period_days": matched.get("period_days"),
+            "details": chore_details,
+        }
 
     @mcp.tool()
     async def execute_chore(name_or_id: str | int) -> dict:
@@ -788,6 +1162,43 @@ def register_tools(mcp: FastMCP) -> None:
             }
             for b in batteries
         ]
+
+    @mcp.tool()
+    async def get_battery_details(name_or_id: str | int) -> dict | None:
+        """
+        Get detailed information about a specific battery.
+
+        Args:
+            name_or_id: Battery name or ID
+
+        Returns battery details including charge cycle info.
+        """
+        client = _get_client()
+        batteries = await client.get_batteries()
+
+        matched = None
+        if isinstance(name_or_id, int) or (isinstance(name_or_id, str) and name_or_id.isdigit()):
+            battery_id = int(name_or_id)
+            matched = next((b for b in batteries if b["id"] == battery_id), None)
+        else:
+            name_lower = str(name_or_id).lower()
+            for b in batteries:
+                if name_lower in b.get("name", "").lower():
+                    matched = b
+                    break
+
+        if not matched:
+            return None
+
+        # Get detailed battery info
+        battery_details = await client.get_battery(matched["id"])
+        return {
+            "id": matched.get("id"),
+            "name": matched.get("name"),
+            "description": matched.get("description"),
+            "charge_interval_days": matched.get("charge_interval_days"),
+            "details": battery_details,
+        }
 
     @mcp.tool()
     async def charge_battery(name_or_id: str | int) -> dict:
@@ -1047,3 +1458,159 @@ def register_tools(mcp: FastMCP) -> None:
         client = _get_client()
         await client.delete_entity(entity_type, entity_id)
         return {"success": True, "deleted": True, "entity_type": entity_type, "entity_id": entity_id}
+
+    # ==================== Bulk Operations ====================
+
+    @mcp.tool()
+    async def bulk_get_stock(names: list[str]) -> list[dict]:
+        """
+        Get stock for multiple products in a single call.
+
+        Args:
+            names: List of product names to check
+
+        Returns stock status for each product.
+        """
+        client = _get_client()
+        products = await client.get_products()
+        stock = await client.get_stock()
+
+        product_map = {p.get("name", "").lower(): p for p in products}
+        stock_map = {s.get("product_id"): s for s in stock}
+
+        results = []
+        for name in names:
+            name_lower = name.lower()
+
+            # Find product
+            matched = product_map.get(name_lower)
+            if not matched:
+                for pname, prod in product_map.items():
+                    if name_lower in pname:
+                        matched = prod
+                        break
+
+            if matched:
+                stock_item = stock_map.get(matched["id"], {})
+                results.append({
+                    "name": matched.get("name"),
+                    "product_id": matched.get("id"),
+                    "amount": stock_item.get("amount", 0),
+                    "amount_opened": stock_item.get("amount_opened", 0),
+                    "best_before_date": stock_item.get("best_before_date"),
+                    "found": True,
+                })
+            else:
+                results.append({
+                    "name": name,
+                    "found": False,
+                })
+
+        return results
+
+    # ==================== BeerSmith Integration ====================
+
+    @mcp.tool()
+    async def list_brewing_ingredients(
+        category: str | None = None,
+        include_prices: bool = True,
+    ) -> list[dict]:
+        """
+        List brewing ingredients from Grocy with pricing for BeerSmith integration.
+
+        Args:
+            category: Filter by product group (e.g., "Hops", "Grains", "Yeast")
+            include_prices: Include price information from stock entries
+
+        Returns list of brewing ingredients with prices suitable for BeerSmith import.
+        """
+        client = _get_client()
+
+        products = await client.get_products()
+        groups = await client.get_product_groups()
+        stock = await client.get_stock()
+
+        group_map = {g["id"]: g.get("name") for g in groups}
+        stock_map = {s.get("product_id"): s for s in stock}
+
+        # Filter by category if specified
+        if category:
+            category_lower = category.lower()
+            target_group_ids = [
+                g["id"] for g in groups
+                if category_lower in g.get("name", "").lower()
+            ]
+            products = [
+                p for p in products
+                if p.get("product_group_id") in target_group_ids
+            ]
+
+        results = []
+        for product in products:
+            product_id = product.get("id")
+            stock_item = stock_map.get(product_id, {})
+
+            entry = {
+                "id": product_id,
+                "name": product.get("name"),
+                "description": product.get("description"),
+                "category": group_map.get(product.get("product_group_id"), "Uncategorized"),
+                "in_stock": stock_item.get("amount", 0),
+                "min_stock": product.get("min_stock_amount", 0),
+            }
+
+            if include_prices:
+                # Try to get price from stock entries
+                try:
+                    entries = await client.get_product_stock_entries(product_id)
+                    if entries:
+                        # Get most recent price
+                        prices = [e.get("price") for e in entries if e.get("price")]
+                        if prices:
+                            entry["last_price"] = prices[-1]
+                            entry["avg_price"] = sum(prices) / len(prices)
+                except Exception:
+                    pass
+
+            results.append(entry)
+
+        return results
+
+    @mcp.tool()
+    async def get_quantity_units() -> list[dict]:
+        """
+        Get all quantity units defined in Grocy.
+
+        Returns list of quantity units with their properties.
+        """
+        client = _get_client()
+        units = await client.get_quantity_units()
+        return [
+            {
+                "id": u.get("id"),
+                "name": u.get("name"),
+                "name_plural": u.get("name_plural"),
+                "description": u.get("description"),
+            }
+            for u in units
+        ]
+
+    @mcp.tool()
+    async def get_userfields(entity_type: str) -> list[dict]:
+        """
+        Get custom userfields for an entity type.
+
+        Args:
+            entity_type: Entity type (products, recipes, chores, etc.)
+
+        Returns list of userfield definitions.
+        """
+        client = _get_client()
+        try:
+            userfields = await client.list_entities("userfields")
+            return [
+                uf for uf in userfields
+                if uf.get("entity") == entity_type
+            ]
+        except Exception:
+            return []

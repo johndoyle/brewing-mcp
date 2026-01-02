@@ -131,7 +131,7 @@ brewing-mcp/
 
 ## Configuration
 
-The MCP servers use environment variables for configuration. See **[SETUP_GUIDE.md](SETUP_GUIDE.md)** for detailed setup instructions by operating system.
+The MCP servers use environment variables for configuration. See **[SETUP_GUIDE.md](docs/SETUP_GUIDE.md)** for detailed setup instructions by operating system.
 
 **Environment Variables**:
 

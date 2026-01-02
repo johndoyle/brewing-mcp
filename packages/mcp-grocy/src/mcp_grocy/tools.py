@@ -32,6 +32,21 @@ def register_tools(mcp: FastMCP) -> None:
         client = _get_client()
         return await client.get_system_info()
 
+    @mcp.tool()
+    async def get_system_config() -> dict:
+        """
+        Get Grocy system configuration settings.
+
+        Returns all configuration values including:
+        - CURRENCY: The currency symbol (e.g., "GBP", "USD", "EUR")
+        - FEATURE_FLAG_* settings
+        - BASE_URL and other system settings
+
+        This is useful for determining the currency when syncing prices to BeerSmith.
+        """
+        client = _get_client()
+        return await client.get_system_config()
+
     # ==================== Stock Management ====================
 
     @mcp.tool()

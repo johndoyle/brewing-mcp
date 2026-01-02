@@ -54,13 +54,33 @@ uv sync
 
 ### Setup & Configuration
 
-For detailed setup instructions including environment variable configuration for macOS and Windows, API key setup, and Claude Desktop integration, see **[SETUP_GUIDE.md](SETUP_GUIDE.md)**.
+For detailed setup instructions see:
+- **[CONFIG.md](docs/CONFIG.md)** - Configuration file reference
+- **[SETUP_GUIDE.md](SETUP_GUIDE.md)** - Environment setup and Claude Desktop integration
 
-Quick reference:
+All configuration is now in the root [`config.json`](config.json) file:
 
-- **BeerSmith MCP**: Set `BEERSMITH_PATH` (optional, auto-detected)
-- **Grocy MCP**: Set `GROCY_URL` and `GROCY_API_KEY`
-- **Brewfather MCP**: Set `BREWFATHER_USER_ID` and `BREWFATHER_API_KEY`
+```json
+{
+  "paths": {
+    "beersmith": "/path/to/BeerSmith3",
+    "uv": "/path/to/uv"
+  },
+  "grocy": {
+    "url": "http://localhost:9283",
+    "api_key": "your-api-key"
+  },
+  "currency": {
+    "default": "GBP",
+    "beersmith": "GBP",
+    "grocy": "GBP",
+    "exchange_rates": {
+      "USD": 0.79,
+      "EUR": 0.86
+    }
+  }
+}
+```
 
 ### Running an MCP Server
 

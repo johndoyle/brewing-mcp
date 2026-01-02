@@ -1,0 +1,53 @@
+{
+  "paths": {
+    "beersmith": "/Users/YOUR_USERNAME/Library/Application Support/BeerSmith3",
+    "uv": "/Users/YOUR_USERNAME/.local/bin/uv"
+  },
+  "grocy": {
+    "url": "http://localhost:9283",
+    "api_key": "your-grocy-api-key-here"
+  },
+  "currency": {
+    "default": "GBP",
+    "beersmith": "GBP",
+    "grocy": "GBP",
+    "exchange_rates": {
+      "USD": 0.79,
+      "EUR": 0.86,
+      "CAD": 0.58,
+      "AUD": 0.51
+    }
+  },
+  "units": {
+    "default_weight": "kg"
+  },
+  "notes": [
+    "SETUP INSTRUCTIONS:",
+    "",
+    "1. Copy this file to config.json:",
+    "   cp config.example.json config.json",
+    "",
+    "2. Update paths.beersmith with your BeerSmith 3 data directory:",
+    "   macOS: /Users/YOUR_USERNAME/Library/Application Support/BeerSmith3",
+    "   Windows: C:\\Users\\YOUR_USERNAME\\Documents\\BeerSmith3",
+    "   Linux: /home/YOUR_USERNAME/.beersmith3",
+    "",
+    "3. Update paths.uv with your uv executable path:",
+    "   macOS/Linux: which uv",
+    "   Windows: (Get-Command uv).Source",
+    "",
+    "4. Update grocy.url and grocy.api_key:",
+    "   - Get API key from Grocy: Settings > Manage API keys",
+    "   - URL format: http://localhost:9283 or http://192.168.x.x:9283",
+    "",
+    "5. Update currency settings:",
+    "   - Query Grocy currency: get_system_config() tool",
+    "   - Update exchange_rates if using multiple currencies",
+    "",
+    "6. NEVER commit config.json (it contains your API key!)",
+    "   - It's in .gitignore for security",
+    "   - Keep config.example.json updated instead",
+    "",
+    "For more details, see docs/CONFIG.md"
+  ]
+}

@@ -28,13 +28,30 @@ def _get_matcher() -> IngredientMatcher:
 
 
 def _load_currency_config() -> dict:
-    """Load currency configuration."""
-    config_path = Path(__file__).parent / "currency_config.json"
-    if config_path.exists():
-        return json.loads(config_path.read_text())
+    """Load currency configuration from root config.json."""
+    # Try root config first
+    root_config_path = Path(__file__).parent.parent.parent.parent.parent.parent / "config.json"
+    if root_config_path.exists():
+        config = json.loads(root_config_path.read_text())
+        return {
+            "default_currency": config["currency"]["default"],
+            "default_weight_unit": config["units"]["default_weight"],
+            "beersmith_currency": config["currency"]["beersmith"],
+            "grocy_currency": config["currency"]["grocy"],
+            "exchange_rates": config["currency"]["exchange_rates"],
+        }
+    
+    # Fallback to legacy config
+    legacy_config_path = Path(__file__).parent / "currency_config.json"
+    if legacy_config_path.exists():
+        return json.loads(legacy_config_path.read_text())
+    
+    # Default values
     return {
         "default_currency": "GBP",
         "default_weight_unit": "kg",
+        "beersmith_currency": "GBP",
+        "grocy_currency": "GBP",
         "exchange_rates": {"USD": 0.79, "EUR": 0.86},
     }
 
@@ -548,49 +565,129 @@ def register_tools(mcp: FastMCP) -> None:
     @mcp.tool()
     def convert_ingredient_price(
         price: float,
-        from_currency: str = "USD",
-        from_weight_unit: str = "lb",
-    ) -> dict:
+        ingredient_type: str,
+        from_unit: str | None = None,
+        from_currency: str | None = None,
+        to_currency: str | None = None,
+    ) -> str:
         """
-        Convert ingredient price to default currency and weight unit.
+        Convert ingredient prices from your local units/currency to BeerSmith's storage format.
+
+        CRITICAL: BeerSmith stores ALL ingredient prices as price per OUNCE ($/oz or £/oz),
+        including grains! When displaying in metric, BeerSmith multiplies by 35.274 to show price/kg.
 
         Args:
-            price: Price in source currency/weight
-            from_currency: Source currency code (default USD)
-            from_weight_unit: Source weight unit (default lb)
+            price: The price value to convert
+            ingredient_type: Type of ingredient - "grain", "hop", "yeast", or "misc"
+            from_unit: Source unit (optional, defaults to kg) - "lb", "kg", "oz", "g", "pkg"
+            from_currency: Source currency (optional, defaults to config) - "USD", "GBP", "EUR"
+            to_currency: Target currency (optional, defaults to config)
 
-        Returns converted price with exchange rate used.
+        Returns:
+            Markdown formatted conversion breakdown with ready-to-use JSON
+
+        Example:
+            # Convert £3.75/kg grain price
+            convert_ingredient_price(3.75, "grain", "kg", "GBP", "GBP")
+            # Result: £0.1063/oz (ready for BeerSmith)
+
+            # Convert €25/kg hops from EUR to GBP
+            convert_ingredient_price(25.0, "hop", "kg", "EUR", "GBP")
+            # Result: £0.6095/oz
+
+            # Grocy price: €0.003/g
+            convert_ingredient_price(0.003, "grain", "g", "EUR", "GBP")
         """
         config = _load_currency_config()
-        target_currency = config["default_currency"]
-        target_weight = config["default_weight_unit"]
 
-        # Get exchange rate
-        rate = 1.0
-        if from_currency != target_currency:
-            if from_currency == "USD":
-                rate = config["exchange_rates"].get(target_currency, 1.0)
-            elif from_currency in config["exchange_rates"]:
-                usd_rate = 1.0 / config["exchange_rates"][from_currency]
-                rate = usd_rate * config["exchange_rates"].get(target_currency, 1.0)
+        # Use config defaults if not specified
+        from_unit = from_unit or config.get("default_weight_unit", "kg")
+        from_currency = from_currency or config.get("default_currency", "GBP")
+        to_currency = to_currency or config.get("beersmith_currency", "GBP")
 
-        # Weight conversion
-        weight_factor = 1.0
-        if from_weight_unit == "lb" and target_weight == "kg":
-            weight_factor = 2.20462  # 1 kg = 2.20462 lb
-        elif from_weight_unit == "oz" and target_weight == "kg":
-            weight_factor = 35.274  # 1 kg = 35.274 oz
-        elif from_weight_unit == "kg" and target_weight == "lb":
-            weight_factor = 1 / 2.20462
+        # CRITICAL: BeerSmith stores ALL prices as price per OUNCE
+        beersmith_unit = "oz" if ingredient_type in ["grain", "hop", "misc"] else "pkg"
 
-        converted_price = price * rate * weight_factor
-
-        return {
-            "original_price": price,
-            "original_currency": from_currency,
-            "original_weight_unit": from_weight_unit,
-            "converted_price": round(converted_price, 2),
-            "target_currency": target_currency,
-            "target_weight_unit": target_weight,
-            "exchange_rate": rate,
+        # Unit conversion factors (FROM source TO ounces)
+        unit_conversions = {
+            ("kg", "oz"): 35.274,  # 1 kg = 35.274 oz
+            ("lb", "oz"): 16.0,  # 1 lb = 16 oz
+            ("g", "oz"): 0.035274,  # 1 g = 0.035274 oz
+            ("oz", "oz"): 1.0,  # No conversion
+            ("pkg", "pkg"): 1.0,  # No conversion
         }
+
+        # Step 1: Currency conversion
+        currency_rate = 1.0
+        if from_currency != to_currency:
+            # Try direct conversion
+            rates = config.get("exchange_rates", {})
+            if from_currency in rates:
+                currency_rate = rates[from_currency]
+            else:
+                return f"Error: Exchange rate not found for {from_currency} in currency_config.json"
+
+        price_in_target_currency = price * currency_rate
+
+        # Step 2: Unit conversion
+        unit_key = (from_unit, beersmith_unit)
+        if unit_key not in unit_conversions:
+            return f"Error: Unsupported unit conversion {from_unit}→{beersmith_unit}. Supported: kg, lb, g, oz, pkg"
+
+        unit_factor = unit_conversions[unit_key]
+        # Price per FROM_UNIT → Price per TO_UNIT: divide by conversion factor
+        final_price = price_in_target_currency / unit_factor
+
+        # Build detailed response
+        lines = [
+            f"# Price Conversion for {ingredient_type.title()}",
+            "",
+            f"**Input:** {from_currency}{price:.4f}/{from_unit}",
+            "",
+        ]
+
+        # Show currency conversion if needed
+        if from_currency != to_currency:
+            lines.extend(
+                [
+                    "## Step 1: Currency Conversion",
+                    f"- {from_currency}{price:.4f} × {currency_rate:.4f} = {to_currency}{price_in_target_currency:.4f}",
+                    f"- Exchange rate: 1 {from_currency} = {currency_rate:.4f} {to_currency}",
+                    "",
+                ]
+            )
+        else:
+            lines.append(f"✓ No currency conversion needed ({from_currency}={to_currency})\n")
+
+        # Show unit conversion
+        if from_unit != beersmith_unit:
+            lines.extend(
+                [
+                    "## Step 2: Unit Conversion",
+                    f"- {to_currency}{price_in_target_currency:.4f}/{from_unit} ÷ {unit_factor:.4f} = {to_currency}{final_price:.4f}/{beersmith_unit}",
+                    f"- Conversion: 1 {from_unit} = {unit_factor:.4f} {beersmith_unit}",
+                    f"- **IMPORTANT:** BeerSmith stores ALL prices as $/oz (or £/oz, €/oz)",
+                    "",
+                ]
+            )
+        else:
+            lines.append(f"✓ No unit conversion needed ({from_unit}={beersmith_unit})\n")
+
+        # Final result
+        lines.extend(
+            [
+                "## Result",
+                f"**BeerSmith Price:** {to_currency}{final_price:.4f}/{beersmith_unit}",
+                "",
+                "✅ Ready to use:",
+                "```json",
+                f'{{"price": {final_price:.4f}}}',
+                "```",
+                "",
+                "Update command:",
+                "```",
+                f'update_ingredient("{ingredient_type}", "INGREDIENT_NAME", \'{{"price": {final_price:.4f}}}\')' "",
+            ]
+        )
+
+        return "\n".join(lines)

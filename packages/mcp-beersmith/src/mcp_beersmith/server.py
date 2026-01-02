@@ -10,7 +10,7 @@ from mcp_beersmith.config import get_config
 # Create the MCP server
 mcp = FastMCP(
     "mcp-beersmith",
-    description="BeerSmith recipe and ingredient integration",
+    instructions="BeerSmith recipe and ingredient integration",
 )
 
 # Register all tools

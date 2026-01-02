@@ -26,9 +26,9 @@ A modular MCP (Model Context Protocol) platform for brewing software integration
 
 | Package | Description | Status |
 | ------- | ----------- | ------ |
-| `brewing-common` | Shared library with models, units, and matching | 🚧 In Progress |
-| `mcp-beersmith` | BeerSmith recipe and ingredient integration | 🚧 In Progress |
-| `mcp-grocy` | Grocy inventory and stock management | 🚧 In Progress |
+| `brewing-common` | Shared library with models, units, and matching | ✅ Complete |
+| `mcp-beersmith` | BeerSmith recipe and ingredient integration | ✅ Complete |
+| `mcp-grocy` | Grocy inventory and stock management | ✅ Complete |
 | `mcp-brewfather` | Brewfather recipe and batch tracking | 📋 Planned |
 
 ## Quick Start
@@ -52,40 +52,24 @@ make install
 uv sync
 ```
 
+### Setup & Configuration
+
+For detailed setup instructions including environment variable configuration for macOS and Windows, API key setup, and Claude Desktop integration, see **[SETUP_GUIDE.md](SETUP_GUIDE.md)**.
+
+Quick reference:
+
+- **BeerSmith MCP**: Set `BEERSMITH_PATH` (optional, auto-detected)
+- **Grocy MCP**: Set `GROCY_URL` and `GROCY_API_KEY`
+- **Brewfather MCP**: Set `BREWFATHER_USER_ID` and `BREWFATHER_API_KEY`
+
 ### Running an MCP Server
 
 ```bash
 # Run the BeerSmith MCP server
 uv run --package mcp-beersmith python -m mcp_beersmith
 
-# Run the Grocy MCP server
+# Run the Grocy MCP server (requires GROCY_URL and GROCY_API_KEY)
 uv run --package mcp-grocy python -m mcp_grocy
-```
-
-### Claude Desktop Configuration
-
-Add to your `~/Library/Application Support/Claude/claude_desktop_config.json`:
-
-```json
-{
-  "mcpServers": {
-    "beersmith": {
-      "command": "uv",
-      "args": ["run", "--directory", "/path/to/brewing-mcp", "--package", "mcp-beersmith", "python", "-m", "mcp_beersmith"],
-      "env": {
-        "BEERSMITH_LIBRARY_PATH": "~/Documents/BeerSmith3/Library"
-      }
-    },
-    "grocy": {
-      "command": "uv",
-      "args": ["run", "--directory", "/path/to/brewing-mcp", "--package", "mcp-grocy", "python", "-m", "mcp_grocy"],
-      "env": {
-        "GROCY_URL": "http://localhost:9283",
-        "GROCY_API_KEY": "your-api-key"
-      }
-    }
-  }
-}
 ```
 
 ## Development
@@ -127,29 +111,16 @@ brewing-mcp/
 
 ## Configuration
 
-Create a config file at `~/.config/brewing-mcp/config.toml`:
+The MCP servers use environment variables for configuration. See **[SETUP_GUIDE.md](SETUP_GUIDE.md)** for detailed setup instructions by operating system.
 
-```toml
-[beersmith]
-library_path = "~/Documents/BeerSmith3/Library"
-recipe_path = "~/Documents/BeerSmith3/Recipes"
+**Environment Variables**:
 
-[grocy]
-url = "http://localhost:9283"
-api_key = "your-api-key"
-
-[brewfather]
-user_id = "your-user-id"
-api_key = "your-api-key"
-```
-
-Or use environment variables:
-
-- `BEERSMITH_LIBRARY_PATH` - Path to BeerSmith library folder
-- `GROCY_URL` - Grocy server URL
-- `GROCY_API_KEY` - Grocy API key
-- `BREWFATHER_USER_ID` - Brewfather user ID
-- `BREWFATHER_API_KEY` - Brewfather API key
+- `BEERSMITH_PATH` - Path to BeerSmith data folder (optional, auto-detected)
+- `BEERSMITH_BACKUP_PATH` - Path for backups (optional)
+- `GROCY_URL` - Grocy server URL (required)
+- `GROCY_API_KEY` - Grocy API key (required)
+- `BREWFATHER_USER_ID` - Brewfather user ID (required)
+- `BREWFATHER_API_KEY` - Brewfather API key (required)
 
 ## License
 

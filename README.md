@@ -56,7 +56,7 @@ uv sync
 
 For detailed setup instructions see:
 - **[CONFIG.md](docs/CONFIG.md)** - Configuration file reference
-- **[SETUP_GUIDE.md](SETUP_GUIDE.md)** - Environment setup and Claude Desktop integration
+- **[SETUP_GUIDE.md](docs/SETUP_GUIDE.md)** - Environment setup and Claude Desktop integration
 
 All configuration is now in the root [`config.json`](config.json) file:
 

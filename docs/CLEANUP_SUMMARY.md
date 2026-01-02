@@ -3,12 +3,12 @@
 ## Changes Made
 
 ### 1. Created Consolidated Configuration
-- **New File**: [`config.json`](config.json) in root directory
+- **New File**: [`config.json`](../config.json) in root directory
 - All configuration now in one place: paths, Grocy settings, currency, units
 - Easier to manage and update than multiple config files
 
 ### 2. Updated Code to Use Root Config
-- Modified [`packages/mcp-beersmith/src/mcp_beersmith/tools.py`](packages/mcp-beersmith/src/mcp_beersmith/tools.py)
+- Modified [`packages/mcp-beersmith/src/mcp_beersmith/tools.py`](../packages/mcp-beersmith/src/mcp_beersmith/tools.py)
 - `_load_currency_config()` now reads from root `config.json`
 - Fallback support for old `currency_config.json` (backed up)
 
@@ -22,9 +22,9 @@ Deleted temporary test/debug scripts:
 These were one-off debugging scripts no longer needed.
 
 ### 4. Created New Documentation
-- **[docs/CONFIG.md](docs/CONFIG.md)** - Comprehensive configuration reference
-- Updated [docs/GROCY_CURRENCY.md](docs/GROCY_CURRENCY.md) - Now references root config
-- Updated [README.md](README.md) - Points to new config structure
+- **[docs/CONFIG.md](CONFIG.md)** - Comprehensive configuration reference
+- Updated [docs/GROCY_CURRENCY.md](GROCY_CURRENCY.md) - Now references root config
+- Updated [README.md](../README.md) - Points to new config structure
 
 ### 5. Backed Up Old Config
 - Moved `packages/mcp-beersmith/src/mcp_beersmith/currency_config.json`
@@ -81,7 +81,7 @@ These were one-off debugging scripts no longer needed.
 
 ## Documentation Index
 
-- [CONFIG.md](docs/CONFIG.md) - Complete configuration reference
-- [PRICE_CONVERSION.md](docs/PRICE_CONVERSION.md) - BeerSmith price storage format
-- [GROCY_CURRENCY.md](docs/GROCY_CURRENCY.md) - Currency detection for price sync
+- [CONFIG.md](CONFIG.md) - Complete configuration reference
+- [PRICE_CONVERSION.md](PRICE_CONVERSION.md) - BeerSmith price storage format
+- [GROCY_CURRENCY.md](GROCY_CURRENCY.md) - Currency detection for price sync
 - [SETUP_GUIDE.md](SETUP_GUIDE.md) - Initial setup and environment configuration

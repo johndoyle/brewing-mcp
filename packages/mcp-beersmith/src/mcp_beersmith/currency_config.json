@@ -1,0 +1,18 @@
+{
+  "default_currency": "GBP",
+  "default_weight_unit": "kg",
+  "beersmith_currency": "GBP",
+  "exchange_rates": {
+    "USD": 0.79,
+    "EUR": 0.86,
+    "CAD": 0.58,
+    "AUD": 0.51
+  },
+  "notes": [
+    "default_currency: Your local currency (GBP, USD, EUR, etc.)",
+    "default_weight_unit: Your preferred unit system (kg for metric, lb for imperial)",
+    "exchange_rates: Rates to convert FROM each currency TO default_currency",
+    "Grains are stored as price per pound (lb) internally in BeerSmith",
+    "Hops are stored as price per ounce (oz) internally in BeerSmith"
+  ]
+}

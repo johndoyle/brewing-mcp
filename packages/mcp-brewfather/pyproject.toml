@@ -1,0 +1,23 @@
+[project]
+name = "mcp-brewfather"
+version = "0.1.0"
+description = "MCP server for Brewfather recipe and batch integration"
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "MIT" }
+
+dependencies = [
+    "brewing-common",
+    "fastmcp>=0.1.0",
+    "httpx>=0.27.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/mcp_brewfather"]
+
+[tool.uv.sources]
+brewing-common = { workspace = true }

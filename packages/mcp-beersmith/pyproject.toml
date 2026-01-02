@@ -1,0 +1,26 @@
+[project]
+name = "mcp-beersmith"
+version = "0.1.0"
+description = "MCP server for BeerSmith recipe and ingredient integration"
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "MIT" }
+
+dependencies = [
+    "brewing-common",
+    "fastmcp>=0.1.0",
+    "httpx>=0.27.0",
+    "lxml>=5.0.0",
+    "pydantic>=2.0.0",
+    "rapidfuzz>=3.0.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/mcp_beersmith"]
+
+[tool.uv.sources]
+brewing-common = { workspace = true }

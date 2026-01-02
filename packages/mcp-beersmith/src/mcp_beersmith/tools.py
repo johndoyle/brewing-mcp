@@ -349,6 +349,60 @@ def register_tools(mcp: FastMCP) -> None:
         return None
 
     @mcp.tool()
+    def list_carbonation_profiles() -> list[dict]:
+        """
+        List carbonation profiles from BeerSmith.
+
+        Returns list of carbonation profiles with carbonation methods and settings.
+        """
+        parser = _get_parser()
+        profiles = parser.get_carbonation_profiles()
+        return [p.model_dump() for p in profiles]
+
+    @mcp.tool()
+    def get_carbonation_profile(name: str) -> dict | None:
+        """
+        Get a specific carbonation profile by name.
+
+        Args:
+            name: Carbonation profile name to search for
+
+        Returns carbonation profile details or None if not found.
+        """
+        parser = _get_parser()
+        profile = parser.get_carbonation_profile(name)
+        if profile:
+            return profile.model_dump()
+        return None
+
+    @mcp.tool()
+    def list_age_profiles() -> list[dict]:
+        """
+        List fermentation/aging profiles from BeerSmith.
+
+        Returns list of fermentation and aging profiles with temperature schedules.
+        """
+        parser = _get_parser()
+        profiles = parser.get_age_profiles()
+        return [p.model_dump() for p in profiles]
+
+    @mcp.tool()
+    def get_age_profile(name: str) -> dict | None:
+        """
+        Get a specific fermentation/aging profile by name.
+
+        Args:
+            name: Fermentation/aging profile name to search for
+
+        Returns fermentation profile with temperature schedule or None if not found.
+        """
+        parser = _get_parser()
+        profile = parser.get_age_profile(name)
+        if profile:
+            return profile.model_dump()
+        return None
+
+    @mcp.tool()
     def match_ingredients(
         names: list[str],
         ingredient_type: str | None = None,

@@ -285,13 +285,67 @@ class BeerSmithParser:
         return styles[0] if styles else None
 
     def get_equipment_profiles(self) -> list[Equipment]:
-        """Get all equipment profiles."""
+        """Get all equipment profiles.
+
+        Note: Equipment.bsmx has a non-standard XML structure with multiple root elements.
+        Standard profiles are in <Equipment><Data>, user-defined profiles are sibling roots.
+        """
         if "Equipment.bsmx" in self._cache:
             del self._cache["Equipment.bsmx"]
-        root = self._parse_xml_file("Equipment.bsmx")
-        if root is None:
+
+        # Special handling for Equipment.bsmx with multiple root elements
+        filepath = self.beersmith_path / "Equipment.bsmx"
+        if not filepath.exists():
             return []
-        equipment = self._parse_items(root, "Equipment", Equipment)
+
+        with open(filepath, "r", encoding="utf-8", errors="replace") as f:
+            content = f.read()
+
+        # Replace HTML entities
+        for entity, replacement in HTML_ENTITIES.items():
+            content = content.replace(entity, replacement)
+        content = re.sub(r'&#(\d+);', lambda m: chr(int(m.group(1))), content)
+        content = re.sub(r'&#x([0-9a-fA-F]+);', lambda m: chr(int(m.group(1), 16)), content)
+
+        # Wrap in fake root to handle multiple root elements
+        wrapped_content = f"<root>{content}</root>"
+
+        try:
+            parser = etree.XMLParser(recover=True, encoding='utf-8')
+            root = etree.fromstring(wrapped_content.encode('utf-8'), parser=parser)
+        except etree.XMLSyntaxError:
+            return []
+
+        equipment = []
+
+        # Parse standard equipment profiles from within <Data> elements
+        for data in root.iter("Data"):
+            for equip_elem in data.findall("Equipment"):
+                try:
+                    equip_dict = self._element_to_dict(equip_elem)
+                    equip = Equipment.model_validate(equip_dict)
+                    equipment.append(equip)
+                except Exception:
+                    continue
+
+        # Parse user-defined equipment profiles at root level
+        # These are <Equipment> elements that are direct children of our fake root
+        # BeerSmith stores version history, so we may see duplicates - keep the last one
+        user_equipment = {}
+        for equip_elem in root.findall("Equipment"):
+            # Skip the container element (has <Data> child)
+            if equip_elem.find("Data") is not None:
+                continue
+            try:
+                equip_dict = self._element_to_dict(equip_elem)
+                equip = Equipment.model_validate(equip_dict)
+                # Use name as key - last occurrence wins
+                user_equipment[equip.name] = equip
+            except Exception:
+                continue
+
+        equipment.extend(user_equipment.values())
+
         return sorted(equipment, key=lambda e: e.name)
 
     def get_equipment(self, name: str) -> Equipment | None:
@@ -433,6 +487,16 @@ class BeerSmithParser:
                             step_dict = self._element_to_dict(step_elem)
                             step = MashStep.model_validate(step_dict)
                             recipe.mash.steps.append(step)
+
+            carb_elem = recipe_elem.find("F_R_CARB")
+            if carb_elem is not None:
+                carb_dict = self._element_to_dict(carb_elem)
+                recipe.carbonation = Carbonation.model_validate(carb_dict)
+
+            age_elem = recipe_elem.find("F_R_AGE")
+            if age_elem is not None:
+                age_dict = self._element_to_dict(age_elem)
+                recipe.age = AgeProfile.model_validate(age_dict)
 
             ingredients_elem = recipe_elem.find("Ingredients")
             if ingredients_elem is not None:

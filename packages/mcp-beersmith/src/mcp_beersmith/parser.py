@@ -360,11 +360,37 @@ class BeerSmithParser:
         return None
 
     def get_mash_profiles(self) -> list[MashProfile]:
-        """Get all mash profiles."""
-        root = self._parse_xml_file("Mash.bsmx")
-        if root is None:
+        """Get all mash profiles.
+
+        Note: Mash.bsmx has a non-standard XML structure with multiple root elements.
+        Standard profiles are in <Mash><Data>, user-defined profiles are sibling roots.
+        """
+        # Special handling for Mash.bsmx with multiple root elements
+        filepath = self.beersmith_path / "Mash.bsmx"
+        if not filepath.exists():
             return []
+
+        with open(filepath, "r", encoding="utf-8", errors="replace") as f:
+            content = f.read()
+
+        # Replace HTML entities
+        for entity, replacement in HTML_ENTITIES.items():
+            content = content.replace(entity, replacement)
+        content = re.sub(r'&#(\d+);', lambda m: chr(int(m.group(1))), content)
+        content = re.sub(r'&#x([0-9a-fA-F]+);', lambda m: chr(int(m.group(1), 16)), content)
+
+        # Wrap in fake root to handle multiple root elements
+        wrapped_content = f"<root>{content}</root>"
+
+        try:
+            parser = etree.XMLParser(recover=True, encoding='utf-8')
+            root = etree.fromstring(wrapped_content.encode('utf-8'), parser=parser)
+        except etree.XMLSyntaxError:
+            return []
+
         profiles = []
+
+        # Parse standard mash profiles from within <Data> elements
         for data in root.iter("Data"):
             for mash_elem in data.findall("Mash"):
                 try:
@@ -381,6 +407,32 @@ class BeerSmithParser:
                     profiles.append(mash)
                 except Exception:
                     pass
+
+        # Parse user-defined mash profiles at root level
+        # BeerSmith stores version history, so we may see duplicates - keep the last one
+        user_profiles = {}
+        for mash_elem in root.findall("Mash"):
+            # Skip the container element (has <Data> child)
+            if mash_elem.find("Data") is not None:
+                continue
+            try:
+                mash_dict = self._element_to_dict(mash_elem)
+                mash = MashProfile.model_validate(mash_dict)
+                steps_elem = mash_elem.find("steps")
+                if steps_elem is not None:
+                    steps_data = steps_elem.find("Data")
+                    if steps_data is not None:
+                        for step_elem in steps_data.findall("MashStep"):
+                            step_dict = self._element_to_dict(step_elem)
+                            step = MashStep.model_validate(step_dict)
+                            mash.steps.append(step)
+                # Use name as key - last occurrence wins
+                user_profiles[mash.name] = mash
+            except Exception:
+                pass
+
+        profiles.extend(user_profiles.values())
+
         return sorted(profiles, key=lambda m: m.name)
 
     def get_mash_profile(self, name: str) -> MashProfile | None:
@@ -395,11 +447,37 @@ class BeerSmithParser:
         return None
 
     def get_carbonation_profiles(self) -> list[Carbonation]:
-        """Get all carbonation profiles."""
-        root = self._parse_xml_file("Carbonation.bsmx")
-        if root is None:
+        """Get all carbonation profiles.
+
+        Note: Carbonation.bsmx has a non-standard XML structure with multiple root elements.
+        Standard profiles are in <Carbonation><Data>, user-defined profiles are sibling roots.
+        """
+        # Special handling for Carbonation.bsmx with multiple root elements
+        filepath = self.beersmith_path / "Carbonation.bsmx"
+        if not filepath.exists():
             return []
+
+        with open(filepath, "r", encoding="utf-8", errors="replace") as f:
+            content = f.read()
+
+        # Replace HTML entities
+        for entity, replacement in HTML_ENTITIES.items():
+            content = content.replace(entity, replacement)
+        content = re.sub(r'&#(\d+);', lambda m: chr(int(m.group(1))), content)
+        content = re.sub(r'&#x([0-9a-fA-F]+);', lambda m: chr(int(m.group(1), 16)), content)
+
+        # Wrap in fake root to handle multiple root elements
+        wrapped_content = f"<root>{content}</root>"
+
+        try:
+            parser = etree.XMLParser(recover=True, encoding='utf-8')
+            root = etree.fromstring(wrapped_content.encode('utf-8'), parser=parser)
+        except etree.XMLSyntaxError:
+            return []
+
         profiles = []
+
+        # Parse standard carbonation profiles from within <Data> elements
         for data in root.iter("Data"):
             for carb_elem in data.findall("Carbonation"):
                 try:
@@ -408,6 +486,24 @@ class BeerSmithParser:
                     profiles.append(carb)
                 except Exception:
                     pass
+
+        # Parse user-defined carbonation profiles at root level
+        # BeerSmith stores version history, so we may see duplicates - keep the last one
+        user_profiles = {}
+        for carb_elem in root.findall("Carbonation"):
+            # Skip the container element (has <Data> child)
+            if carb_elem.find("Data") is not None:
+                continue
+            try:
+                carb_dict = self._element_to_dict(carb_elem)
+                carb = Carbonation.model_validate(carb_dict)
+                # Use name as key - last occurrence wins
+                user_profiles[carb.name] = carb
+            except Exception:
+                pass
+
+        profiles.extend(user_profiles.values())
+
         return sorted(profiles, key=lambda c: c.name)
 
     def get_carbonation_profile(self, name: str) -> Carbonation | None:

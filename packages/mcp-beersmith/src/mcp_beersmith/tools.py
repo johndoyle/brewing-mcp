@@ -7,7 +7,7 @@ from fastmcp import FastMCP
 
 from mcp_beersmith.config import get_config
 from mcp_beersmith.matching import IngredientMatcher
-from mcp_beersmith.models import Recipe
+from mcp_beersmith.models import Recipe, RecipeGrain, RecipeHop, RecipeYeast, grams_to_oz
 from mcp_beersmith.parser import BeerSmithParser
 
 
@@ -139,6 +139,224 @@ def register_tools(mcp: FastMCP) -> None:
                 break
 
         return results
+
+    @mcp.tool()
+    def create_recipe(
+        name: str,
+        style_name: str,
+        equipment_name: str,
+        grains_json: str,
+        hops_json: str,
+        yeast_name: str,
+        boil_time: float = 60.0,
+        mash_profile_name: str = "",
+        carbonation_profile_name: str = "",
+        age_profile_name: str = "",
+        brewer: str = "",
+        notes: str = "",
+    ) -> str:
+        """
+        Create a new recipe in BeerSmith.
+
+        The recipe will be saved directly to BeerSmith and appear in the "MCP Created" folder.
+
+        Args:
+            name: Recipe name
+            style_name: Target beer style (e.g., "American IPA")
+            equipment_name: Equipment profile to use
+            grains_json: JSON array of grains: [{"name": "Pale Malt", "amount_kg": 5.0}, ...]
+            hops_json: JSON array of hops: [{"name": "Cascade", "amount_g": 50, "time": 60, "use": "boil"}, ...]
+            yeast_name: Yeast strain name or product ID
+            boil_time: Boil time in minutes (default 60)
+            mash_profile_name: Mash profile name (optional, defaults to "Single Infusion")
+            carbonation_profile_name: Carbonation profile (optional, defaults to "Keg")
+            age_profile_name: Age/fermentation profile (optional, defaults to "Ale, Two Stage")
+            brewer: Brewer name (optional)
+            notes: Recipe notes (optional)
+
+        Returns:
+            Confirmation message with details
+        """
+        parser = _get_parser()
+
+        # Parse JSON inputs
+        try:
+            grains_data = json.loads(grains_json)
+            hops_data = json.loads(hops_json)
+        except json.JSONDecodeError as e:
+            return f"Error parsing JSON: {e}"
+
+        # Get style
+        style = parser.get_style(style_name)
+        if not style:
+            return f"Style '{style_name}' not found. Use list_styles to see available styles."
+
+        # Get equipment
+        equipment = parser.get_equipment(equipment_name)
+        if not equipment:
+            return f"Equipment '{equipment_name}' not found. Use list_equipment to see available profiles."
+
+        # Get yeast
+        yeast = parser.get_yeast(yeast_name)
+        if not yeast:
+            return f"Yeast '{yeast_name}' not found. Use list_yeasts to see available strains."
+
+        # Get default settings from BeerSmith's DefRecipe.bsopt
+        beersmith_defaults = parser.get_default_recipe_settings()
+
+        # Get default profiles from most recent MCP-created recipe as secondary fallback
+        mcp_default_profiles = None
+        if not (mash_profile_name and carbonation_profile_name and age_profile_name):
+            # Try to get the most recent MCP-created recipe to use its profiles as defaults
+            try:
+                mcp_recipes = parser.get_recipes(folder="/MCP Created/")
+                if mcp_recipes:
+                    # Get the most recent recipe (last in list)
+                    recent_recipe = parser.get_recipe(mcp_recipes[-1].id)
+                    if recent_recipe:
+                        mcp_default_profiles = {
+                            'mash': recent_recipe.mash,
+                            'carbonation': recent_recipe.carbonation,
+                            'age': recent_recipe.age,
+                        }
+            except Exception:
+                pass  # Fall back to hardcoded defaults if this fails
+
+        # Get mash profile
+        # Priority: explicit param > BeerSmith default > MCP recipe default > hardcoded fallback
+        if mash_profile_name:
+            mash_profile = parser.get_mash_profile(mash_profile_name)
+        elif beersmith_defaults.get('mash'):
+            mash_profile = parser.get_mash_profile(beersmith_defaults['mash'])
+        elif mcp_default_profiles and mcp_default_profiles['mash']:
+            mash_profile = mcp_default_profiles['mash']
+        else:
+            mash_profile = parser.get_mash_profile("Single Infusion, Light Body, Batch Sparge")
+            if not mash_profile:
+                mash_profile = parser.get_mash_profile("Single Infusion")
+
+        if not mash_profile:
+            return "No suitable mash profile found. Please specify a mash_profile_name."
+
+        # Get carbonation profile
+        # Priority: explicit param > BeerSmith default > MCP recipe default > hardcoded fallback
+        if carbonation_profile_name:
+            carbonation_profile = parser.get_carbonation_profile(carbonation_profile_name)
+        elif beersmith_defaults.get('carbonation'):
+            carbonation_profile = parser.get_carbonation_profile(beersmith_defaults['carbonation'])
+        elif mcp_default_profiles and mcp_default_profiles['carbonation']:
+            carbonation_profile = mcp_default_profiles['carbonation']
+        else:
+            carbonation_profile = parser.get_carbonation_profile("Keg")
+            if not carbonation_profile:
+                carb_profiles = parser.get_carbonation_profiles()
+                carbonation_profile = carb_profiles[0] if carb_profiles else None
+
+        # Get age/fermentation profile
+        # Priority: explicit param > BeerSmith default > MCP recipe default > hardcoded fallback
+        if age_profile_name:
+            age_profile = parser.get_age_profile(age_profile_name)
+        elif beersmith_defaults.get('age'):
+            age_profile = parser.get_age_profile(beersmith_defaults['age'])
+        elif mcp_default_profiles and mcp_default_profiles['age']:
+            age_profile = mcp_default_profiles['age']
+        else:
+            age_profile = parser.get_age_profile("Ale, Two Stage")
+            if not age_profile:
+                age_profile = parser.get_age_profile("Ale, Single Stage")
+
+        # Use BeerSmith default brewer if not specified
+        if not brewer and beersmith_defaults.get('brewer'):
+            brewer = beersmith_defaults['brewer']
+
+        # Build recipe
+        recipe = Recipe(
+            id="0",
+            name=name,
+            brewer=brewer,
+            notes=notes,
+            boil_time=boil_time,
+            style=style,
+            equipment=equipment,
+            mash=mash_profile,
+            carbonation=carbonation_profile,
+            age=age_profile,
+            folder="/MCP Created/",
+        )
+
+        # Add grains
+        for grain_data in grains_data:
+            grain = parser.get_grain(grain_data["name"])
+            if not grain:
+                return f"Grain '{grain_data['name']}' not found. Use list_grains to see available grains."
+
+            amount_kg = grain_data.get("amount_kg", 0)
+            recipe_grain = RecipeGrain(
+                id=grain.id,
+                name=grain.name,
+                amount_oz=grams_to_oz(amount_kg * 1000),
+                color=grain.color,
+                yield_pct=grain.yield_pct,
+                type=grain.type,
+                origin=grain.origin,
+                notes=grain.notes,
+            )
+            recipe.grains.append(recipe_grain)
+
+        # Add hops
+        use_map = {"boil": 0, "dry hop": 1, "mash": 2, "first wort": 3, "whirlpool": 4}
+        for hop_data in hops_data:
+            hop = parser.get_hop(hop_data["name"])
+            if not hop:
+                return f"Hop '{hop_data['name']}' not found. Use list_hops to see available hops."
+
+            recipe_hop = RecipeHop(
+                id=hop.id,
+                name=hop.name,
+                amount_oz=grams_to_oz(hop_data.get("amount_g", 0)),
+                alpha=hop.alpha,
+                boil_time=hop_data.get("time", 60),
+                use=use_map.get(hop_data.get("use", "boil").lower(), 0),
+                type=hop.type,
+                origin=hop.origin,
+                notes=hop.notes,
+            )
+            recipe.hops.append(recipe_hop)
+
+        # Add yeast
+        recipe_yeast = RecipeYeast(
+            id=yeast.id,
+            name=yeast.name,
+            lab=yeast.lab,
+            product_id=yeast.product_id,
+            type=yeast.type,
+            form=yeast.form,
+            min_attenuation=yeast.min_attenuation,
+            max_attenuation=yeast.max_attenuation,
+            min_temp_f=yeast.min_temp_f,
+            max_temp_f=yeast.max_temp_f,
+            amount=1,
+        )
+        recipe.yeasts.append(recipe_yeast)
+
+        # Save recipe
+        try:
+            # Add recipe directly to BeerSmith's Recipe.bsmx
+            parser.add_recipe_to_beersmith(recipe)
+
+            # Also save as exportable file for backup
+            parser.save_recipe(recipe)
+            export_path = parser.beersmith_path / "MCP_Exports"
+
+            return (
+                f"✅ Recipe '{name}' created successfully!\n\n"
+                f"The recipe has been added to BeerSmith and should appear in your recipe list.\n"
+                f"Look for it in the '/MCP Created/' folder.\n\n"
+                f"A backup copy was also saved to: {export_path}\n\n"
+                f"**Note:** You may need to restart BeerSmith to see the new recipe."
+            )
+        except Exception as e:
+            return f"Error saving recipe: {e}"
 
     @mcp.tool()
     def list_hops(search: str | None = None, hop_type: int | None = None) -> list[dict]:
@@ -401,6 +619,19 @@ def register_tools(mcp: FastMCP) -> None:
         if profile:
             return profile.model_dump()
         return None
+
+    @mcp.tool()
+    def get_default_recipe_settings() -> dict:
+        """
+        Get default recipe settings from BeerSmith's DefRecipe.bsopt file.
+
+        Returns BeerSmith's default profile selections that will be used when creating new recipes.
+        This includes equipment, mash, carbonation, age, style, and brewer name defaults.
+
+        Returns dict with keys: equipment, mash, carbonation, age, style, brewer
+        """
+        parser = _get_parser()
+        return parser.get_default_recipe_settings()
 
     @mcp.tool()
     def match_ingredients(

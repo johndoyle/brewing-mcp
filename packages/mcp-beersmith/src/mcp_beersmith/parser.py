@@ -590,6 +590,57 @@ class BeerSmithParser:
                 return profile
         return None
 
+    def get_default_recipe_settings(self) -> dict[str, str]:
+        """Get default recipe settings from BeerSmith's DefRecipe.bsopt file.
+
+        Returns a dictionary with keys: equipment, mash, carbonation, age, style, brewer
+        """
+        def_recipe_path = self.beersmith_path / "DefRecipe.bsopt"
+        if not def_recipe_path.exists():
+            return {}
+
+        try:
+            content = def_recipe_path.read_text(encoding="utf-8")
+            parser = etree.XMLParser(recover=True, encoding='utf-8')
+            root = etree.fromstring(content.encode('utf-8'), parser=parser)
+
+            defaults = {}
+
+            # Extract equipment profile name
+            equip_elem = root.find(".//F_R_EQUIPMENT/F_E_NAME")
+            if equip_elem is not None and equip_elem.text:
+                defaults['equipment'] = equip_elem.text
+
+            # Extract mash profile name
+            mash_elem = root.find(".//F_R_MASH/F_MH_NAME")
+            if mash_elem is not None and mash_elem.text:
+                defaults['mash'] = mash_elem.text
+
+            # Extract carbonation profile name
+            carb_elem = root.find(".//F_R_CARB/F_C_NAME")
+            if carb_elem is not None and carb_elem.text:
+                defaults['carbonation'] = carb_elem.text
+
+            # Extract age profile name
+            age_elem = root.find(".//F_R_AGE/F_A_NAME")
+            if age_elem is not None and age_elem.text:
+                defaults['age'] = age_elem.text
+
+            # Extract style name
+            style_elem = root.find(".//F_R_STYLE/F_S_NAME")
+            if style_elem is not None and style_elem.text:
+                defaults['style'] = style_elem.text
+
+            # Extract brewer name
+            brewer_elem = root.find(".//F_R_BREWER")
+            if brewer_elem is not None and brewer_elem.text:
+                defaults['brewer'] = brewer_elem.text
+
+            return defaults
+        except Exception as e:
+            # If we can't parse the default recipe file, return empty dict
+            return {}
+
     def get_misc_ingredients(self, search: str | None = None) -> list[Misc]:
         """Get all miscellaneous ingredients."""
         root = self._parse_xml_file("Misc.bsmx")
@@ -825,6 +876,84 @@ class BeerSmithParser:
 <Name>MCP Export</Name><Type>7372</Type><Dirty>1</Dirty>
 <Data>{xml_content}</Data></Recipe>"""
         filepath.write_text(full_xml, encoding="utf-8")
+        return True
+
+    def add_recipe_to_beersmith(self, recipe: Recipe) -> bool:
+        """
+        Add a recipe directly to BeerSmith's Recipe.bsmx file.
+
+        This makes the recipe appear in BeerSmith without manual import.
+        Creates a backup before modifying the file.
+        """
+        recipe_file = self.beersmith_path / "Recipe.bsmx"
+
+        if not recipe_file.exists():
+            raise FileNotFoundError(f"Recipe.bsmx not found at {recipe_file}")
+
+        # Create backup
+        self.backup_path.mkdir(exist_ok=True)
+        backup_file = self.backup_path / f"Recipe_backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.bsmx"
+        shutil.copy2(recipe_file, backup_file)
+
+        # Read the current Recipe.bsmx file
+        content = recipe_file.read_text(encoding="utf-8")
+
+        # Generate the recipe XML
+        recipe_xml = self._generate_recipe_xml(recipe)
+
+        # Create a Table (folder) structure for "MCP Created" if it doesn't exist
+        folder_name = "MCP Created"
+
+        # Check if the "MCP Created" folder already exists
+        mcp_folder_pattern = r'<Table>.*?<Name>MCP Created</Name>.*?<Data>(.*?)</Data>.*?</Table>'
+        folder_match = re.search(mcp_folder_pattern, content, re.DOTALL)
+
+        if folder_match:
+            # Folder exists - insert the recipe into it
+            # Find the position right before the closing </Data> of the MCP Created folder
+            folder_data_end = folder_match.end(1)  # End of the Data content
+            new_content = content[:folder_data_end] + recipe_xml + content[folder_data_end:]
+        else:
+            # Folder doesn't exist - create it with the recipe inside
+            folder_xml = f"""<Table><_PERMID_>9999</_PERMID_>
+<_MOD_>{datetime.now().strftime('%Y-%m-%d')}</_MOD_>
+<Name>{folder_name}</Name>
+<Type>7372</Type>
+<Dirty>1</Dirty>
+<Owndata>1</Owndata>
+<TID>9999</TID>
+<Size>1</Size>
+<_XName>Folder</_XName>
+<Allocinc>16</Allocinc>
+<Data>{recipe_xml}</Data>
+<_TExpanded>1</_TExpanded>
+<TExtra>0</TExtra>
+<TxLog>0</TxLog>
+<PermCount>0</PermCount>
+<TxCount>0</TxCount>
+<TxTable>0</TxTable>
+<TxPath></TxPath>
+</Table>
+"""
+
+            # Insert the folder at the end of the main Data section
+            # Find the correct position: before the LAST </Data> that's followed by <_TExpanded> and has <PermCount> nearby
+            # This pattern uniquely identifies the main data section closing
+            end_pattern = r'</Data>\s*\n\s*<_TExpanded>[^<]*</[^>]+>[^<]*<TExtra>[^<]*</[^>]+>[^<]*<TxLog>1</TxLog>'
+            match = re.search(end_pattern, content)
+            if match:
+                # Insert right before the </Data> tag
+                insert_pos = match.start()
+                new_content = content[:insert_pos] + folder_xml + content[insert_pos:]
+            else:
+                raise ValueError("Could not find insertion point in Recipe.bsmx")
+
+        # Write the modified content
+        recipe_file.write_text(new_content, encoding="utf-8")
+
+        # Clear cache
+        self._cache.clear()
+
         return True
 
     def update_ingredient(self, ingredient_type: str, ingredient_name: str, updates: dict) -> bool:

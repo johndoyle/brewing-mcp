@@ -115,7 +115,8 @@ Edit `~/Library/Application Support/Claude/claude_desktop_config.json`:
         "mcp_beersmith"
       ],
       "env": {
-        "BEERSMITH_PATH": "~/Library/Application Support/BeerSmith3"
+        "BEERSMITH_PATH": "~/Library/Application Support/BeerSmith3",
+        "PYTHONWARNINGS": "ignore::DeprecationWarning"
       }
     },
     "grocy": {
@@ -132,7 +133,8 @@ Edit `~/Library/Application Support/Claude/claude_desktop_config.json`:
       ],
       "env": {
         "GROCY_URL": "http://localhost:9283",
-        "GROCY_API_KEY": "your-api-key-here"
+        "GROCY_API_KEY": "your-api-key-here",
+        "PYTHONWARNINGS": "ignore::DeprecationWarning"
       }
     }
   }
@@ -140,8 +142,11 @@ Edit `~/Library/Application Support/Claude/claude_desktop_config.json`:
 ```
 
 Replace:
+- `/Users/john/Development/brewing-mcp` with the actual path to your installation
 - `your-api-key-here` with your actual Grocy API key
 - `localhost:9283` with your Grocy server address if different
+
+**Note**: `PYTHONWARNINGS` suppresses deprecation warnings that can interfere with the MCP protocol.
 
 ---
 
@@ -300,7 +305,8 @@ Edit `%APPDATA%\Claude\claude_desktop_config.json` (usually at `C:\Users\YourUse
         "mcp_beersmith"
       ],
       "env": {
-        "BEERSMITH_PATH": "C:\\Users\\YourUsername\\Documents\\BeerSmith3"
+        "BEERSMITH_PATH": "C:\\Users\\YourUsername\\Documents\\BeerSmith3",
+        "PYTHONWARNINGS": "ignore::DeprecationWarning"
       }
     },
     "grocy": {
@@ -317,7 +323,8 @@ Edit `%APPDATA%\Claude\claude_desktop_config.json` (usually at `C:\Users\YourUse
       ],
       "env": {
         "GROCY_URL": "http://localhost:9283",
-        "GROCY_API_KEY": "your-api-key-here"
+        "GROCY_API_KEY": "your-api-key-here",
+        "PYTHONWARNINGS": "ignore::DeprecationWarning"
       }
     }
   }

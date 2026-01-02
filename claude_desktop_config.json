@@ -1,0 +1,39 @@
+{
+  "mcpServers": {
+    "beersmith": {
+      "command": "/Users/john/.local/bin/uv",
+      "args": [
+        "run",
+        "--directory",
+        "/Users/john/Development/brewing-mcp",
+        "--package",
+        "mcp-beersmith",
+        "python",
+        "-m",
+        "mcp_beersmith"
+      ],
+      "env": {
+        "BEERSMITH_PATH": "/Users/john/Library/Application Support/BeerSmith3",
+        "PYTHONWARNINGS": "ignore"
+      }
+    },
+    "grocy": {
+      "command": "/Users/john/.local/bin/uv",
+      "args": [
+        "run",
+        "--directory",
+        "/Users/john/Development/brewing-mcp",
+        "--package",
+        "mcp-grocy",
+        "python",
+        "-m",
+        "mcp_grocy"
+      ],
+      "env": {
+        "GROCY_URL": "http://192.168.24.24:9283",
+        "GROCY_API_KEY": "GTQl3siubFpwSZMU4lLjW8MDLMMScdJNSXv3jvsbTCeEojnFsS",
+        "PYTHONWARNINGS": "ignore"
+      }
+    }
+  }
+}

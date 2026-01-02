@@ -84,6 +84,8 @@ All configuration is now in the root [`config.json`](config.json) file:
 
 ### Running an MCP Server
 
+Actually you don't need to start the MCP servers manually if using Claude Desktop, as it will launch them automatically. But for development or testing you can run them directly:
+
 ```bash
 # Run the BeerSmith MCP server
 uv run --package mcp-beersmith python -m mcp_beersmith

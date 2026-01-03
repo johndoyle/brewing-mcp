@@ -6,9 +6,10 @@ MCP server for Brewfather recipe and batch tracking integration.
 
 - **Recipe Management**: List, search, and view Brewfather recipes
 - **Batch Tracking**: View active batches and fermentation progress
+- **Batch Management**: Update status, log measurements, track brew tracker
+- **Fermentation Monitoring**: Log and retrieve gravity/temperature readings
+- **Inventory Management**: Full CRUD for fermentables, hops, yeasts, and miscs
 - **Recipe Import**: Import recipes from BeerSmith (via normalised format)
-- **Inventory Sync**: Check ingredient availability against Grocy
-- **Brew Day Tools**: Create batches, log readings
 
 ## Setup
 
@@ -27,19 +28,11 @@ export BREWFATHER_USER_ID="your-user-id"
 export BREWFATHER_API_KEY="your-api-key"
 ```
 
-Or in `~/.config/brewing-mcp/config.toml`:
-
-```toml
-[brewfather]
-user_id = "your-user-id"
-api_key = "your-api-key"
-```
-
 ### Getting Your Brewfather API Key
 
 1. Go to Brewfather settings
 2. Navigate to "API" section
-3. Generate a new API key
+3. Generate a new API key with desired scopes
 4. Note your User ID (also shown on the API page)
 
 ### Running
@@ -49,79 +42,69 @@ api_key = "your-api-key"
 uv run --package mcp-brewfather python -m mcp_brewfather
 ```
 
-## Tools
+## Tools (25 total)
 
-### list_recipes
+### Recipe Tools
 
-List all Brewfather recipes.
+| Tool | Description |
+|------|-------------|
+| `list_recipes` | List all Brewfather recipes with optional limit and archive filter |
+| `get_recipe` | Get a specific recipe by name (fuzzy) or ID |
+| `search_recipes` | Search recipes by name or style |
+| `import_recipe` | Import a recipe from normalised format (e.g., from BeerSmith) |
 
-**Parameters:**
+### Batch Tools
 
-- `limit` (optional): Maximum recipes to return (default 50)
-- `include_archived` (optional): Include archived recipes
+| Tool | Description |
+|------|-------------|
+| `list_batches` | List batches with optional status filter |
+| `get_batch` | Get batch details including fermentation data |
+| `create_batch` | Create a new batch from a recipe |
+| `update_batch_status` | Update batch status (Planning, Brewing, Fermenting, etc.) |
+| `update_batch_measurements` | Update measured OG, FG, batch size, efficiency |
+| `get_active_batches` | Get all currently active batches with latest readings |
 
-### get_recipe
+### Fermentation Tracking
 
-Get a specific recipe by name or ID.
+| Tool | Description |
+|------|-------------|
+| `log_reading` | Log a gravity or temperature reading to a batch |
+| `get_batch_readings` | Get all fermentation readings for a batch |
+| `get_last_reading` | Get the most recent reading for a batch |
+| `get_brewtracker` | Get brew tracker status (step-by-step progress) |
 
-**Parameters:**
+### Inventory - Listing
 
-- `identifier` (required): Recipe name (fuzzy) or ID
+| Tool | Description |
+|------|-------------|
+| `list_fermentables` | List fermentables (grains, sugars, extracts) with inventory |
+| `list_hops` | List hops with alpha acid and inventory |
+| `list_yeasts` | List yeasts with attenuation and inventory |
+| `list_miscs` | List misc items (water agents, fining, spices) |
+| `get_inventory_item` | Get details for a specific inventory item |
+| `get_inventory_summary` | Get summary of all inventory with counts |
+| `search_inventory` | Search inventory by name across all types |
 
-### search_recipes
+### Inventory - Updates
 
-Search recipes by name, style, or ingredient.
+| Tool | Description |
+|------|-------------|
+| `update_fermentable_inventory` | Set or adjust fermentable inventory (kg) |
+| `update_hop_inventory` | Set or adjust hop inventory (grams) |
+| `update_yeast_inventory` | Set or adjust yeast inventory (packages) |
+| `update_misc_inventory` | Set or adjust misc item inventory |
 
-**Parameters:**
+## API Scopes
 
-- `query` (required): Search query
-- `field` (optional): Field to search (name, style)
+Different operations require different API scopes:
 
-### list_batches
-
-List brewing batches.
-
-**Parameters:**
-
-- `status` (optional): Filter by status (planning, brewing, fermenting, conditioning, completed)
-- `limit` (optional): Maximum batches to return
-
-### get_batch
-
-Get batch details including fermentation data.
-
-**Parameters:**
-
-- `identifier` (required): Batch name or ID
-
-### create_batch
-
-Create a new batch from a recipe.
-
-**Parameters:**
-
-- `recipe_id` (required): Recipe ID
-- `brew_date` (optional): Brew date (ISO format, defaults to today)
-- `batch_name` (optional): Custom batch name
-
-### log_reading
-
-Log a gravity or temperature reading to a batch.
-
-**Parameters:**
-
-- `batch_id` (required): Batch ID
-- `gravity` (optional): Gravity reading (e.g., 1.050)
-- `temperature` (optional): Temperature in Celsius
-- `note` (optional): Reading note
-
-### import_recipe
-
-Import a recipe from normalised format (e.g., from BeerSmith).
-
-**Parameters:**
-
-- `recipe` (required): Normalised recipe object
+| Scope | Operations |
+|-------|------------|
+| Read Recipes | list_recipes, get_recipe, search_recipes |
+| Read Batches | list_batches, get_batch, get_batch_readings, get_brewtracker |
+| Edit Batches | create_batch, update_batch_status, update_batch_measurements, log_reading |
+| Read Inventory | list_*, get_inventory_*, search_inventory |
+| Edit Inventory | update_*_inventory |
 
 ## Claude Desktop Configuration
 
@@ -147,8 +130,7 @@ Import a recipe from normalised format (e.g., from BeerSmith).
 
 ## API Rate Limits
 
-Brewfather API has rate limits. This server implements:
+Brewfather API limits: 500 calls per hour per API key. The server handles:
 
-- Request caching (5 minute TTL for read operations)
-- Automatic retry with exponential backoff
-- Request queuing to prevent bursts
+- Automatic pagination for large result sets
+- Returns HTTP 429 with Retry-After header when exceeded

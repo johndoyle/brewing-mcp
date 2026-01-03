@@ -29,7 +29,7 @@ A modular MCP (Model Context Protocol) platform for brewing software integration
 | `brewing-common` | Shared library with models, units, and matching | ✅ Complete |
 | `mcp-beersmith` | BeerSmith recipe and ingredient integration | ✅ Complete (30 tools) |
 | `mcp-grocy` | Grocy inventory and stock management | ✅ Complete (50 tools) |
-| `mcp-brewfather` | Brewfather recipe and batch tracking | 📋 Planned |
+| `mcp-brewfather` | Brewfather recipe and batch tracking | ✅ Complete (25 tools) |
 
 ## Quick Start
 
@@ -253,6 +253,65 @@ Full integration with Grocy for inventory management, recipes, chores, tasks, an
 
 ---
 
+## Brewfather MCP Tools (25 tools)
+
+Full integration with Brewfather for cloud-based recipe management, batch tracking, and inventory.
+
+### Recipe Tools
+| Tool | Description |
+|------|-------------|
+| `list_recipes` | List all Brewfather recipes with optional limit and archive filter |
+| `get_recipe` | Get a specific recipe by name (fuzzy) or ID |
+| `search_recipes` | Search recipes by name or style |
+| `import_recipe` | Import a recipe from normalised format (e.g., from BeerSmith) |
+
+### Batch Management
+| Tool | Description |
+|------|-------------|
+| `list_batches` | List batches with optional status filter |
+| `get_batch` | Get batch details including fermentation data |
+| `create_batch` | Create a new batch from a recipe |
+| `update_batch_status` | Update batch status (Planning, Brewing, Fermenting, etc.) |
+| `update_batch_measurements` | Update measured OG, FG, batch size, efficiency |
+| `get_active_batches` | Get all currently active batches with latest readings |
+
+### Fermentation Tracking
+| Tool | Description |
+|------|-------------|
+| `log_reading` | Log a gravity or temperature reading to a batch |
+| `get_batch_readings` | Get all fermentation readings for a batch |
+| `get_last_reading` | Get the most recent reading for a batch |
+| `get_brewtracker` | Get brew tracker status (step-by-step progress) |
+
+### Inventory - Listing
+| Tool | Description |
+|------|-------------|
+| `list_fermentables` | List fermentables (grains, sugars, extracts) with inventory |
+| `list_hops` | List hops with alpha acid and inventory |
+| `list_yeasts` | List yeasts with attenuation and inventory |
+| `list_miscs` | List misc items (water agents, fining, spices) |
+| `get_inventory_item` | Get details for a specific inventory item |
+| `get_inventory_summary` | Get summary of all inventory with counts |
+| `search_inventory` | Search inventory by name across all types |
+
+### Inventory - Updates
+| Tool | Description |
+|------|-------------|
+| `update_fermentable_inventory` | Set or adjust fermentable inventory (kg) |
+| `update_hop_inventory` | Set or adjust hop inventory (grams) |
+| `update_yeast_inventory` | Set or adjust yeast inventory (packages) |
+| `update_misc_inventory` | Set or adjust misc item inventory |
+
+### Key Features
+- **Cloud-based**: Access recipes and batches from anywhere
+- **Batch tracking**: Monitor fermentation progress with readings
+- **Brew tracker**: Step-by-step brewing progress tracking
+- **Inventory management**: Full CRUD for all ingredient types
+- **API pagination**: Automatic handling of large result sets
+- **Recipe import**: Import from BeerSmith via normalised format
+
+---
+
 ## Running MCP Servers
 
 Claude Desktop will launch MCP servers automatically. For development or testing:
@@ -263,6 +322,9 @@ uv run --package mcp-beersmith python -m mcp_beersmith
 
 # Run the Grocy MCP server
 uv run --package mcp-grocy python -m mcp_grocy
+
+# Run the Brewfather MCP server
+uv run --package mcp-brewfather python -m mcp_brewfather
 ```
 
 ## Development
@@ -306,8 +368,12 @@ brewing-mcp/
 │   │       ├── server.py       # FastMCP server
 │   │       ├── tools.py        # Tool definitions
 │   │       └── client.py       # Grocy API client
-│   └── mcp-brewfather/         # Brewfather MCP (planned)
+│   └── mcp-brewfather/         # Brewfather MCP (25 tools)
 │       └── src/mcp_brewfather/
+│           ├── server.py       # FastMCP server
+│           ├── tools.py        # Tool definitions
+│           ├── client.py       # Brewfather API client
+│           └── adapter.py      # Normalised format adapter
 └── docs/
     ├── CONFIG.md               # Configuration reference
     └── SETUP_GUIDE.md          # Setup instructions
@@ -323,8 +389,8 @@ brewing-mcp/
 | `BEERSMITH_BACKUP_PATH` | Path for backups | Optional |
 | `GROCY_URL` | Grocy server URL | Yes |
 | `GROCY_API_KEY` | Grocy API key | Yes |
-| `BREWFATHER_USER_ID` | Brewfather user ID | Planned |
-| `BREWFATHER_API_KEY` | Brewfather API key | Planned |
+| `BREWFATHER_USER_ID` | Brewfather user ID | Yes |
+| `BREWFATHER_API_KEY` | Brewfather API key | Yes |
 
 ### BeerSmith Data Files
 

@@ -830,11 +830,117 @@ class BeerSmithParser:
                 "</F_R_STYLE>",
             ])
         if recipe.equipment:
+            eq = recipe.equipment
             lines.extend([
                 "<F_R_EQUIPMENT>",
-                f"<F_E_NAME>{self._xml_escape(recipe.equipment.name)}</F_E_NAME>",
-                f"<F_E_EFFICIENCY>{recipe.equipment.efficiency:.7f}</F_E_EFFICIENCY>",
+                "<_PERMID_>0</_PERMID_>",
+                f"<_MOD_>{datetime.now().strftime('%Y-%m-%d')}</_MOD_>",
+                f"<F_E_NAME>{self._xml_escape(eq.name)}</F_E_NAME>",
+                f"<F_E_TYPE>{eq.type}</F_E_TYPE>",
+                f"<F_E_MASH_VOL>{eq.mash_vol_oz:.7f}</F_E_MASH_VOL>",
+                f"<F_E_TUN_MASS>{eq.tun_mass:.7f}</F_E_TUN_MASS>",
+                f"<F_E_TUN_SPECIFIC_HEAT>{eq.tun_specific_heat:.7f}</F_E_TUN_SPECIFIC_HEAT>",
+                f"<F_E_TUN_DEADSPACE>{eq.tun_deadspace:.7f}</F_E_TUN_DEADSPACE>",
+                f"<F_E_BOIL_VOL>{eq.boil_vol_oz:.7f}</F_E_BOIL_VOL>",
+                f"<F_E_BOIL_TIME>{eq.boil_time:.7f}</F_E_BOIL_TIME>",
+                f"<F_E_BOIL_OFF>{eq.boil_off_oz:.7f}</F_E_BOIL_OFF>",
+                f"<F_E_TRUB_LOSS>{eq.trub_loss_oz:.7f}</F_E_TRUB_LOSS>",
+                f"<F_E_BATCH_VOL>{eq.batch_vol_oz:.7f}</F_E_BATCH_VOL>",
+                f"<F_E_FERMENTER_LOSS>{eq.fermenter_loss_oz:.7f}</F_E_FERMENTER_LOSS>",
+                f"<F_E_EFFICIENCY>{eq.efficiency:.7f}</F_E_EFFICIENCY>",
+                f"<F_E_HOP_UTIL>{eq.hop_utilization:.7f}</F_E_HOP_UTIL>",
+                f"<F_E_NOTES>{self._xml_escape(eq.notes)}</F_E_NOTES>",
                 "</F_R_EQUIPMENT>",
+            ])
+        # Add mash profile
+        if recipe.mash:
+            mash = recipe.mash
+            lines.extend([
+                "<F_R_MASH>",
+                "<_PERMID_>0</_PERMID_>",
+                f"<_MOD_>{datetime.now().strftime('%Y-%m-%d')}</_MOD_>",
+                f"<F_MH_NAME>{self._xml_escape(mash.name)}</F_MH_NAME>",
+                f"<F_MH_GRAIN_TEMP>{mash.grain_temp_f:.7f}</F_MH_GRAIN_TEMP>",
+                f"<F_MH_SPARGE_TEMP>{mash.sparge_temp_f:.7f}</F_MH_SPARGE_TEMP>",
+                f"<F_MH_PH>{mash.ph:.7f}</F_MH_PH>",
+                f"<F_MH_NOTES>{self._xml_escape(mash.notes)}</F_MH_NOTES>",
+            ])
+            # Add mash steps
+            if mash.steps:
+                lines.extend([
+                    "<steps><_PERMID_>0</_PERMID_>",
+                    f"<_MOD_>{datetime.now().strftime('%Y-%m-%d')}</_MOD_>",
+                    "<Name>steps</Name>",
+                    "<Type>7432</Type>",
+                    "<Dirty>1</Dirty>",
+                    "<Owndata>1</Owndata>",
+                    "<TID>7149</TID>",
+                    f"<Size>{len(mash.steps)}</Size>",
+                    "<_XName>steps</_XName>",
+                    "<Allocinc>16</Allocinc>",
+                    "<Data>",
+                ])
+                for step in mash.steps:
+                    lines.extend([
+                        "<MashStep>",
+                        "<_PERMID_>0</_PERMID_>",
+                        f"<_MOD_>{datetime.now().strftime('%Y-%m-%d')}</_MOD_>",
+                        f"<F_MS_NAME>{self._xml_escape(step.name)}</F_MS_NAME>",
+                        f"<F_MS_TYPE>{step.type}</F_MS_TYPE>",
+                        f"<F_MS_INFUSION>{step.infusion_amount_oz:.7f}</F_MS_INFUSION>",
+                        f"<F_MS_STEP_TEMP>{step.step_temp_f:.7f}</F_MS_STEP_TEMP>",
+                        f"<F_MS_STEP_TIME>{step.step_time:.7f}</F_MS_STEP_TIME>",
+                        f"<F_MS_RISE_TIME>{step.rise_time:.7f}</F_MS_RISE_TIME>",
+                        f"<F_MS_INFUSION_TEMP>{step.infusion_temp_f:.7f}</F_MS_INFUSION_TEMP>",
+                        "</MashStep>",
+                    ])
+                lines.extend([
+                    "</Data>",
+                    "<_TExpanded>1</_TExpanded>",
+                    "<TExtra>0</TExtra>",
+                    "</steps>",
+                ])
+            lines.append("</F_R_MASH>")
+        # Add carbonation profile
+        if recipe.carbonation:
+            carb = recipe.carbonation
+            lines.extend([
+                "<F_R_CARB>",
+                "<_PERMID_>0</_PERMID_>",
+                f"<_MOD_>{datetime.now().strftime('%Y-%m-%d')}</_MOD_>",
+                f"<F_C_NAME>{self._xml_escape(carb.name)}</F_C_NAME>",
+                f"<F_C_TYPE>{carb.type}</F_C_TYPE>",
+                f"<F_C_TEMPERATURE>{carb.temperature:.7f}</F_C_TEMPERATURE>",
+                f"<F_C_PRIMER_NAME>{self._xml_escape(carb.primer_name)}</F_C_PRIMER_NAME>",
+                f"<F_C_CARB_RATE>{carb.carb_rate:.7f}</F_C_CARB_RATE>",
+                f"<F_C_NOTES>{self._xml_escape(carb.notes)}</F_C_NOTES>",
+                "</F_R_CARB>",
+            ])
+        # Add age/fermentation profile
+        if recipe.age:
+            age = recipe.age
+            lines.extend([
+                "<F_R_AGE>",
+                "<_PERMID_>0</_PERMID_>",
+                f"<_MOD_>{datetime.now().strftime('%Y-%m-%d')}</_MOD_>",
+                f"<F_A_NAME>{self._xml_escape(age.name)}</F_A_NAME>",
+                f"<F_A_TYPE>{age.type}</F_A_TYPE>",
+                f"<F_A_PRIM_TEMP>{age.prim_temp:.7f}</F_A_PRIM_TEMP>",
+                f"<F_A_PRIM_END_TEMP>{age.prim_end_temp:.7f}</F_A_PRIM_END_TEMP>",
+                f"<F_A_SEC_TEMP>{age.sec_temp:.7f}</F_A_SEC_TEMP>",
+                f"<F_A_SEC_END_TEMP>{age.sec_end_temp:.7f}</F_A_SEC_END_TEMP>",
+                f"<F_A_TERT_TEMP>{age.tert_temp:.7f}</F_A_TERT_TEMP>",
+                f"<F_A_TERT_END_TEMP>{age.tert_end_temp:.7f}</F_A_TERT_END_TEMP>",
+                f"<F_A_AGE_TEMP>{age.age_temp:.7f}</F_A_AGE_TEMP>",
+                f"<F_A_END_AGE_TEMP>{age.end_age_temp:.7f}</F_A_END_AGE_TEMP>",
+                f"<F_A_BULK_TEMP>{age.bulk_temp:.7f}</F_A_BULK_TEMP>",
+                f"<F_A_BULK_END_TEMP>{age.bulk_end_temp:.7f}</F_A_BULK_END_TEMP>",
+                f"<F_A_PRIM_DAYS>{age.prim_days:.7f}</F_A_PRIM_DAYS>",
+                f"<F_A_SEC_DAYS>{age.sec_days:.7f}</F_A_SEC_DAYS>",
+                f"<F_A_TERT_DAYS>{age.tert_days:.7f}</F_A_TERT_DAYS>",
+                f"<F_A_BULK_DAYS>{age.bulk_days:.7f}</F_A_BULK_DAYS>",
+                f"<F_A_AGE>{age.age_days:.7f}</F_A_AGE>",
+                "</F_R_AGE>",
             ])
         lines.append("<Ingredients><Data>")
         for grain in recipe.grains:

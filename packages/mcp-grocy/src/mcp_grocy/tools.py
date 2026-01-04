@@ -1351,6 +1351,7 @@ def register_tools(mcp: FastMCP) -> None:
         description: str | None = None,
         product_group_id: int | None = None,
         min_stock_amount: float = 0,
+        location_id: int | None = None,
     ) -> dict:
         """
         Create a new product.
@@ -1358,12 +1359,45 @@ def register_tools(mcp: FastMCP) -> None:
         Args:
             name: Product name
             description: Product description
-            product_group_id: Product group ID
+            product_group_id: Product group ID (optional, can be found using get_product_groups)
             min_stock_amount: Minimum stock level
+            location_id: Default location ID (optional, can be found using get_locations)
 
-        Returns created product.
+        Returns created product or error details.
         """
         client = _get_client()
+
+        # Validate product_group_id if provided
+        if product_group_id is not None:
+            groups = await client.get_product_groups()
+            group_ids = [g["id"] for g in groups]
+            if product_group_id not in group_ids:
+                return {
+                    "error": f"Invalid product_group_id {product_group_id}. Valid IDs: {group_ids}",
+                    "available_groups": [
+                        {"id": g["id"], "name": g["name"]}
+                        for g in groups
+                    ],
+                }
+
+        # Get locations and validate/set default location_id
+        locations = await client.get_locations()
+        if not locations:
+            return {"error": "No locations found in Grocy. Please create a location first."}
+
+        if location_id is not None:
+            location_ids = [loc["id"] for loc in locations]
+            if location_id not in location_ids:
+                return {
+                    "error": f"Invalid location_id {location_id}. Valid IDs: {location_ids}",
+                    "available_locations": [
+                        {"id": loc["id"], "name": loc["name"]}
+                        for loc in locations
+                    ],
+                }
+        else:
+            # Use first location as default if none specified
+            location_id = locations[0]["id"]
 
         # Get default quantity unit
         units = await client.get_quantity_units()
@@ -1373,16 +1407,24 @@ def register_tools(mcp: FastMCP) -> None:
             "name": name,
             "qu_id_purchase": default_unit,
             "qu_id_stock": default_unit,
-            "qu_factor_purchase_to_stock": 1,
             "min_stock_amount": min_stock_amount,
+            "location_id": location_id,  # Always required
         }
         if description:
             product_data["description"] = description
-        if product_group_id:
+        if product_group_id is not None:
             product_data["product_group_id"] = product_group_id
 
-        result = await client.create_product(product_data)
-        return {"success": True, "product": result}
+        try:
+            result = await client.create_product(product_data)
+            return {"success": True, "product": result}
+        except Exception as e:
+            # Return detailed error information
+            return {
+                "success": False,
+                "error": str(e),
+                "product_data_sent": product_data,
+            }
 
     # ==================== Generic CRUD ====================
 

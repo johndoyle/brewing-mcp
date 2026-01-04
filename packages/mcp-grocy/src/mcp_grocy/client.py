@@ -45,7 +45,29 @@ class GrocyClient:
                 headers=self.headers,
                 **kwargs,
             )
-            response.raise_for_status()
+
+            # Provide detailed error info for debugging
+            try:
+                response.raise_for_status()
+            except httpx.HTTPStatusError as e:
+                # Try to get error details from response body
+                error_detail = ""
+                try:
+                    error_body = response.json()
+                    error_detail = f"\nAPI Response: {error_body}"
+                except Exception:
+                    error_detail = f"\nAPI Response Text: {response.text}"
+
+                # Include request details for debugging
+                request_body = ""
+                if "json" in kwargs:
+                    request_body = f"\nRequest Body: {kwargs['json']}"
+
+                raise httpx.HTTPStatusError(
+                    f"{e.response.status_code} {e.response.reason_phrase} for url '{e.request.url}'{error_detail}{request_body}",
+                    request=e.request,
+                    response=e.response,
+                )
 
             if response.status_code == 204:
                 return None

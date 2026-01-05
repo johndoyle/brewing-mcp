@@ -196,6 +196,16 @@ def register_tools(mcp: FastMCP) -> None:
         if not equipment:
             return f"Equipment '{equipment_name}' not found. Use list_equipment to see available profiles."
 
+        # Check for unrealistic equipment settings
+        warnings = []
+        if equipment.hop_utilization > 50.0:
+            warnings.append(
+                f"⚠️  WARNING: Equipment hop utilization is {equipment.hop_utilization}% which is unrealistically high!\n"
+                f"   Typical values: 20-30% for pellets, 15-20% for whole hops.\n"
+                f"   This will cause IBU calculations to be much higher than expected.\n"
+                f"   Consider updating your equipment profile's hop utilization setting."
+            )
+
         # Get yeast
         yeast = parser.get_yeast(yeast_name)
         if not yeast:
@@ -299,7 +309,19 @@ def register_tools(mcp: FastMCP) -> None:
                 yield_pct=grain.yield_pct,
                 type=grain.type,
                 origin=grain.origin,
+                supplier=grain.supplier,
                 notes=grain.notes,
+                moisture=grain.moisture,
+                diastatic_power=grain.diastatic_power,
+                protein=grain.protein,
+                max_in_batch=grain.max_in_batch,
+                recommend_mash=grain.recommend_mash,
+                inventory=grain.inventory,
+                price=grain.price,
+                use=0,  # Default to mash
+                percent=0.0,  # Will be calculated by BeerSmith
+                late_extract=0.0,
+                add_after_boil=False,
             )
             recipe.grains.append(recipe_grain)
 
@@ -315,11 +337,18 @@ def register_tools(mcp: FastMCP) -> None:
                 name=hop.name,
                 amount_oz=grams_to_oz(hop_data.get("amount_g", 0)),
                 alpha=hop.alpha,
+                beta=hop.beta,
                 boil_time=hop_data.get("time", 60),
                 use=use_map.get(hop_data.get("use", "boil").lower(), 0),
                 type=hop.type,
+                form=hop.form,
                 origin=hop.origin,
                 notes=hop.notes,
+                hsi=hop.hsi,
+                inventory=hop.inventory,
+                price=hop.price,
+                dry_hop_time=3.0,  # Default 3 days
+                ibu_contribution=0.0,  # Will be calculated by BeerSmith
             )
             recipe.hops.append(recipe_hop)
 
@@ -331,11 +360,20 @@ def register_tools(mcp: FastMCP) -> None:
             product_id=yeast.product_id,
             type=yeast.type,
             form=yeast.form,
+            flocculation=yeast.flocculation,
             min_attenuation=yeast.min_attenuation,
             max_attenuation=yeast.max_attenuation,
             min_temp_f=yeast.min_temp_f,
             max_temp_f=yeast.max_temp_f,
+            tolerance=yeast.tolerance,
+            best_for=yeast.best_for,
+            notes=yeast.notes,
+            inventory=yeast.inventory,
+            price=yeast.price,
             amount=1,
+            use_starter=False,
+            add_to_secondary=False,
+            starter_size=0.0,
         )
         recipe.yeasts.append(recipe_yeast)
 
@@ -348,12 +386,22 @@ def register_tools(mcp: FastMCP) -> None:
             parser.save_recipe(recipe)
             export_path = parser.beersmith_path / "MCP_Exports"
 
+            warning_text = "\n\n".join(warnings) if warnings else ""
+            warning_section = f"\n\n{warning_text}" if warnings else ""
+
             return (
                 f"✅ Recipe '{name}' created successfully!\n\n"
                 f"The recipe has been added to BeerSmith and should appear in your recipe list.\n"
                 f"Look for it in the '/MCP Created/' folder.\n\n"
                 f"A backup copy was also saved to: {export_path}\n\n"
-                f"**Note:** You may need to restart BeerSmith to see the new recipe."
+                f"**Recipe Parameters:**\n"
+                f"- Boil Time: {boil_time} minutes\n"
+                f"- Grains: {len(recipe.grains)} ({sum(g.amount_oz for g in recipe.grains) * 0.0283495:.2f} kg)\n"
+                f"- Hops: {len(recipe.hops)} additions\n"
+                f"- Equipment: {equipment.name} ({equipment.batch_vol_oz * 0.0295735:.1f}L batch, {equipment.efficiency}% efficiency)\n"
+                f"{warning_section}\n\n"
+                f"**Note:** You may need to restart BeerSmith to see the new recipe.\n"
+                f"BeerSmith will calculate OG, FG, ABV, and IBU based on your grain bill and equipment settings."
             )
         except Exception as e:
             return f"Error saving recipe: {e}"

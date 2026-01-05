@@ -438,6 +438,94 @@ def register_tools(mcp: FastMCP) -> None:
         ]
 
     @mcp.tool()
+    async def get_products_with_stock_entries(
+        category: str | None = None,
+        only_in_stock: bool = True,
+    ) -> list[dict]:
+        """
+        Get stock entries for multiple products efficiently.
+
+        This is much faster than calling get_product_entries repeatedly for each product
+        as it fetches all data in one pass.
+
+        Args:
+            category: Optional product group/category filter (e.g., "Hops", "Grains")
+            only_in_stock: Only return products that currently have stock (default True)
+
+        Returns list of products with their stock entries, purchase dates, prices, etc.
+        """
+        client = _get_client()
+
+        # Fetch all data once
+        products = await client.get_products()
+        stock = await client.get_stock()
+        groups = await client.get_product_groups()
+        locations = await client.get_locations()
+
+        # Build maps
+        stock_map = {s.get("product_id"): s for s in stock}
+        group_map = {g["id"]: g.get("name") for g in groups}
+        loc_map = {loc["id"]: loc.get("name") for loc in locations}
+
+        # Filter by category if specified
+        if category:
+            category_lower = category.lower()
+            target_group_ids = [
+                g["id"] for g in groups
+                if category_lower in g.get("name", "").lower()
+            ]
+            products = [
+                p for p in products
+                if p.get("product_group_id") in target_group_ids
+            ]
+
+        # Filter by stock if requested
+        if only_in_stock:
+            products = [
+                p for p in products
+                if stock_map.get(p["id"], {}).get("amount", 0) > 0
+            ]
+
+        # Get entries for each product
+        results = []
+        for product in products:
+            product_id = product.get("id")
+            stock_item = stock_map.get(product_id, {})
+
+            # Get stock entries for this product
+            try:
+                entries = await client.get_product_stock_entries(product_id)
+            except Exception:
+                entries = []
+
+            # Format entries
+            formatted_entries = [
+                {
+                    "entry_id": e.get("id"),
+                    "amount": e.get("amount"),
+                    "best_before_date": e.get("best_before_date"),
+                    "purchased_date": e.get("purchased_date"),
+                    "price": e.get("price"),
+                    "location": loc_map.get(e.get("location_id"), "Unknown"),
+                    "open": e.get("open", 0) == 1,
+                    "note": e.get("note"),
+                }
+                for e in entries
+            ]
+
+            results.append({
+                "product_id": product_id,
+                "product_name": product.get("name"),
+                "category": group_map.get(product.get("product_group_id"), "Uncategorized"),
+                "total_stock": stock_item.get("amount", 0),
+                "total_stock_opened": stock_item.get("amount_opened", 0),
+                "entries": formatted_entries,
+                "entry_count": len(formatted_entries),
+            })
+
+        return results
+
+    @mcp.tool()
     async def match_product_by_name(
         name: str,
         threshold: float = 70.0,

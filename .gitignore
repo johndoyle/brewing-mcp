@@ -62,5 +62,6 @@ Thumbs.db
 # Project specific
 *.bsmx
 *.beerxml
+restart.sh
 # Configuration (contains API keys and secrets)
 config.json

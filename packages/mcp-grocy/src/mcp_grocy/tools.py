@@ -167,6 +167,301 @@ def _get_unit_for_category(category_name: str, units: list[dict]) -> int | None:
     return None
 
 
+# ==================== Malt Color Matching Utilities ====================
+
+def _lovibond_to_ebc(lovibond: float) -> float:
+    """Convert Lovibond to EBC color units."""
+    return lovibond * 2.63
+
+
+def _ebc_to_lovibond(ebc: float) -> float:
+    """Convert EBC to Lovibond color units."""
+    return ebc / 2.63
+
+
+def _parse_malt_color(text: str) -> dict | None:
+    """
+    Parse malt color specifications from a name or description.
+
+    Supports formats:
+    - "60L" or "60°L" or "60 L" (Lovibond)
+    - "Crystal 60" or "Crystal 60L" (Lovibond)
+    - "EBC 150" or "150 EBC" or "EBC 150-180" (EBC)
+    - "150-180 EBC" (EBC range)
+
+    Returns:
+        Dictionary with ebc_min, ebc_max, ebc_mid, lovibond, or None if not found.
+    """
+    if not text:
+        return None
+
+    text = text.upper()
+
+    # Pattern 1: Lovibond - "60L", "60°L", "60 L", "Crystal 60L"
+    lovibond_patterns = [
+        r'(\d+)\s*°?\s*L\b',  # 60L, 60°L, 60 L
+        r'CRYSTAL\s*(\d+)\b(?!\s*EBC)',  # Crystal 60 (but not Crystal 60 EBC)
+        r'CARAMEL\s*(\d+)\b(?!\s*EBC)',  # Caramel 60
+    ]
+
+    for pattern in lovibond_patterns:
+        match = re.search(pattern, text)
+        if match:
+            lovibond = float(match.group(1))
+            ebc = _lovibond_to_ebc(lovibond)
+            return {
+                "lovibond": lovibond,
+                "ebc_min": ebc,
+                "ebc_max": ebc,
+                "ebc_mid": ebc,
+                "source": "lovibond",
+            }
+
+    # Pattern 2: EBC range - "150-180 EBC", "EBC 150-180", "EBC: 150-180"
+    ebc_range_patterns = [
+        r'EBC[:\s]*(\d+)\s*[-–]\s*(\d+)',  # EBC 150-180, EBC: 150-180
+        r'(\d+)\s*[-–]\s*(\d+)\s*EBC',  # 150-180 EBC
+    ]
+
+    for pattern in ebc_range_patterns:
+        match = re.search(pattern, text)
+        if match:
+            ebc_min = float(match.group(1))
+            ebc_max = float(match.group(2))
+            ebc_mid = (ebc_min + ebc_max) / 2
+            return {
+                "lovibond": _ebc_to_lovibond(ebc_mid),
+                "ebc_min": ebc_min,
+                "ebc_max": ebc_max,
+                "ebc_mid": ebc_mid,
+                "source": "ebc_range",
+            }
+
+    # Pattern 3: Single EBC - "EBC 150", "150 EBC"
+    ebc_single_patterns = [
+        r'EBC[:\s]*(\d+)(?!\s*[-–])',  # EBC 150 (not followed by range)
+        r'(\d+)\s*EBC\b',  # 150 EBC
+    ]
+
+    for pattern in ebc_single_patterns:
+        match = re.search(pattern, text)
+        if match:
+            ebc = float(match.group(1))
+            return {
+                "lovibond": _ebc_to_lovibond(ebc),
+                "ebc_min": ebc,
+                "ebc_max": ebc,
+                "ebc_mid": ebc,
+                "source": "ebc_single",
+            }
+
+    return None
+
+
+def _is_crystal_malt(name: str) -> bool:
+    """Check if a product name indicates a crystal/caramel malt."""
+    name_lower = name.lower()
+    crystal_keywords = ["crystal", "caramel", "cara", "caramalt", "carapils", "caramunich", "carared", "carahell"]
+    return any(kw in name_lower for kw in crystal_keywords)
+
+
+def _calculate_color_match_score(
+    target_ebc: float,
+    product_ebc_min: float,
+    product_ebc_max: float,
+    tolerance: float = 30.0,
+) -> float:
+    """
+    Calculate a match score for color compatibility.
+
+    Returns:
+        Score from 0-100, where 100 is perfect match, 0 is outside tolerance.
+    """
+    product_ebc_mid = (product_ebc_min + product_ebc_max) / 2
+
+    # If target is within the product's range, it's a perfect match
+    if product_ebc_min <= target_ebc <= product_ebc_max:
+        return 100.0
+
+    # Calculate distance to nearest edge of range
+    if target_ebc < product_ebc_min:
+        distance = product_ebc_min - target_ebc
+    else:
+        distance = target_ebc - product_ebc_max
+
+    # Score based on distance within tolerance
+    if distance > tolerance:
+        return 0.0
+
+    # Linear score: 100 at distance 0, 50 at edge of tolerance
+    return max(0, 100 - (distance / tolerance * 50))
+
+
+def _find_ingredient_substitutes(
+    ingredient_name: str,
+    products: list[dict],
+    stock: list[dict] | None = None,
+    tolerance_ebc: float = 30.0,
+) -> list[dict]:
+    """
+    Find suitable substitute products for an ingredient.
+
+    For crystal/caramel malts, matches based on color specifications.
+    For other ingredients, uses fuzzy name matching.
+
+    Args:
+        ingredient_name: The ingredient name to find substitutes for
+        products: List of Grocy products
+        stock: Optional list of stock entries for availability info
+        tolerance_ebc: EBC tolerance for color matching (default 30)
+
+    Returns:
+        List of substitute matches with scores and details.
+    """
+    substitutes = []
+    stock_map = {s.get("product_id"): s for s in (stock or [])}
+
+    # Parse color from ingredient name
+    ingredient_color = _parse_malt_color(ingredient_name)
+    is_crystal = _is_crystal_malt(ingredient_name)
+
+    for product in products:
+        product_name = product.get("name", "")
+        product_desc = product.get("description", "")
+        product_id = product.get("id")
+
+        match_info = {
+            "product_id": product_id,
+            "product_name": product_name,
+            "score": 0,
+            "match_type": None,
+            "details": {},
+        }
+
+        # Add stock info if available
+        if stock_map and product_id in stock_map:
+            match_info["stock_amount"] = stock_map[product_id].get("amount", 0)
+
+        # For crystal malts with color info, try color matching
+        if is_crystal and ingredient_color and _is_crystal_malt(product_name):
+            # Try to parse color from product name and description
+            product_color = _parse_malt_color(product_name)
+            if not product_color:
+                product_color = _parse_malt_color(product_desc)
+
+            if product_color:
+                color_score = _calculate_color_match_score(
+                    ingredient_color["ebc_mid"],
+                    product_color["ebc_min"],
+                    product_color["ebc_max"],
+                    tolerance_ebc,
+                )
+
+                if color_score > 0:
+                    match_info["score"] = color_score
+                    match_info["match_type"] = "color"
+                    match_info["details"] = {
+                        "target_ebc": round(ingredient_color["ebc_mid"], 1),
+                        "target_lovibond": round(ingredient_color["lovibond"], 1),
+                        "product_ebc_range": f"{product_color['ebc_min']:.0f}-{product_color['ebc_max']:.0f}",
+                        "ebc_difference": round(abs(ingredient_color["ebc_mid"] - product_color["ebc_mid"]), 1),
+                    }
+                    substitutes.append(match_info)
+                    continue
+
+        # Fuzzy name matching for non-crystal or if color matching failed
+        name_lower = ingredient_name.lower()
+        product_name_lower = product_name.lower()
+
+        # Exact match
+        if name_lower == product_name_lower:
+            match_info["score"] = 100
+            match_info["match_type"] = "exact"
+            substitutes.append(match_info)
+            continue
+
+        # Contains match
+        if name_lower in product_name_lower:
+            match_info["score"] = 85
+            match_info["match_type"] = "contains"
+            substitutes.append(match_info)
+            continue
+
+        if product_name_lower in name_lower:
+            match_info["score"] = 75
+            match_info["match_type"] = "partial"
+            substitutes.append(match_info)
+            continue
+
+        # Word overlap matching
+        name_words = set(name_lower.replace("-", " ").replace("/", " ").split())
+        product_words = set(product_name_lower.replace("-", " ").replace("/", " ").split())
+
+        # Remove common filler words
+        filler_words = {"malt", "malts", "the", "a", "an", "-", "/"}
+        name_words -= filler_words
+        product_words -= filler_words
+
+        if name_words and product_words:
+            overlap = len(name_words & product_words)
+            total = len(name_words | product_words)
+            if overlap > 0:
+                word_score = (overlap / total) * 70  # Max 70 for word matching
+                if word_score >= 30:  # Minimum threshold
+                    match_info["score"] = word_score
+                    match_info["match_type"] = "word_overlap"
+                    match_info["details"]["matching_words"] = list(name_words & product_words)
+                    substitutes.append(match_info)
+
+    # Sort by score descending
+    substitutes.sort(key=lambda x: x["score"], reverse=True)
+
+    return substitutes
+
+
+async def _smart_match_ingredient(
+    ingredient_name: str,
+    products: list[dict],
+    stock: list[dict] | None = None,
+    min_score: float = 50.0,
+) -> dict:
+    """
+    Smart ingredient matching with color awareness for brewing ingredients.
+
+    Args:
+        ingredient_name: The ingredient name to match
+        products: List of Grocy products
+        stock: Optional stock data for availability info
+        min_score: Minimum match score to consider (default 50)
+
+    Returns:
+        Dictionary with match result, including best_match and alternatives.
+    """
+    substitutes = _find_ingredient_substitutes(ingredient_name, products, stock)
+
+    # Filter by minimum score
+    valid_matches = [s for s in substitutes if s["score"] >= min_score]
+
+    if not valid_matches:
+        return {
+            "found": False,
+            "ingredient": ingredient_name,
+            "best_match": None,
+            "alternatives": [],
+        }
+
+    best_match = valid_matches[0]
+    alternatives = valid_matches[1:5]  # Top 4 alternatives
+
+    return {
+        "found": True,
+        "ingredient": ingredient_name,
+        "best_match": best_match,
+        "alternatives": alternatives,
+        "is_exact": best_match["match_type"] == "exact" and best_match["score"] == 100,
+    }
+
+
 def _get_client() -> GrocyClient:
     """Get a configured Grocy client."""
     return GrocyClient(get_config())
@@ -1093,9 +1388,16 @@ def register_tools(mcp: FastMCP) -> None:
         ingredients: list[dict],
         description: str | None = None,
         servings: int = 1,
+        use_substitutes: bool = True,
+        min_match_score: float = 50.0,
     ) -> dict:
         """
-        Create a new recipe with ingredients in one operation.
+        Create a new recipe with smart ingredient matching.
+
+        Uses intelligent matching for brewing ingredients:
+        - Crystal/Caramel malts are matched by color (Lovibond/EBC)
+        - Other ingredients use fuzzy name matching
+        - Reports substitutes when exact match not found
 
         Args:
             name: Recipe name
@@ -1105,8 +1407,10 @@ def register_tools(mcp: FastMCP) -> None:
                 - note: Optional note
             description: Recipe description
             servings: Number of servings (default 1)
+            use_substitutes: If True, use substitute matches when exact not found (default True)
+            min_match_score: Minimum score (0-100) for substitute matching (default 50)
 
-        Returns created recipe with ingredient status.
+        Returns created recipe with ingredient matching details.
         """
         client = _get_client()
 
@@ -1124,11 +1428,12 @@ def register_tools(mcp: FastMCP) -> None:
         if not recipe_id:
             return {"error": "Failed to create recipe"}
 
-        # Get products for matching
+        # Get products and stock for smart matching
         products = await client.get_products()
-        product_map = {p.get("name", "").lower(): p for p in products}
+        stock = await client.get_stock()
 
         added_ingredients = []
+        substituted_ingredients = []
         not_found_ingredients = []
 
         for ing in ingredients:
@@ -1136,35 +1441,86 @@ def register_tools(mcp: FastMCP) -> None:
             amount = ing.get("amount", 1)
             note = ing.get("note")
 
-            # Find matching product
-            name_lower = ing_name.lower()
-            matched = product_map.get(name_lower)
-            if not matched:
-                for pname, prod in product_map.items():
-                    if name_lower in pname or pname in name_lower:
-                        matched = prod
-                        break
+            # Use smart matching
+            match_result = await _smart_match_ingredient(
+                ing_name,
+                products,
+                stock,
+                min_score=min_match_score,
+            )
 
-            if matched:
-                await client.add_recipe_ingredient(
-                    recipe_id=recipe_id,
-                    product_id=matched["id"],
-                    amount=amount,
-                    note=note,
-                )
-                added_ingredients.append({
-                    "name": matched.get("name"),
-                    "amount": amount,
-                })
+            if match_result["found"]:
+                best_match = match_result["best_match"]
+                matched_product_id = best_match["product_id"]
+                matched_product_name = best_match["product_name"]
+
+                # Decide whether to use this match
+                is_exact = match_result["is_exact"]
+                should_use = is_exact or use_substitutes
+
+                if should_use:
+                    await client.add_recipe_ingredient(
+                        recipe_id=recipe_id,
+                        product_id=matched_product_id,
+                        amount=amount,
+                        note=note,
+                    )
+
+                    ingredient_info = {
+                        "requested": ing_name,
+                        "matched": matched_product_name,
+                        "amount": amount,
+                        "match_type": best_match["match_type"],
+                        "match_score": best_match["score"],
+                    }
+
+                    # Add color details for crystal malt matches
+                    if best_match["match_type"] == "color" and best_match.get("details"):
+                        ingredient_info["color_match"] = best_match["details"]
+
+                    # Add stock info if available
+                    if "stock_amount" in best_match:
+                        ingredient_info["stock_available"] = best_match["stock_amount"]
+
+                    if is_exact:
+                        added_ingredients.append(ingredient_info)
+                    else:
+                        # Include alternatives for substituted ingredients
+                        ingredient_info["alternatives"] = [
+                            {
+                                "name": alt["product_name"],
+                                "score": alt["score"],
+                                "match_type": alt["match_type"],
+                            }
+                            for alt in match_result["alternatives"][:3]
+                        ]
+                        substituted_ingredients.append(ingredient_info)
+                else:
+                    # Match found but substitutes disabled
+                    not_found_ingredients.append({
+                        "name": ing_name,
+                        "suggested_substitute": matched_product_name,
+                        "match_score": best_match["score"],
+                        "match_type": best_match["match_type"],
+                    })
             else:
-                not_found_ingredients.append(ing_name)
+                not_found_ingredients.append({
+                    "name": ing_name,
+                    "suggested_substitute": None,
+                })
 
         return {
             "success": True,
             "recipe_id": recipe_id,
             "recipe_name": name,
             "ingredients_added": added_ingredients,
+            "ingredients_substituted": substituted_ingredients,
             "ingredients_not_found": not_found_ingredients,
+            "summary": {
+                "exact_matches": len(added_ingredients),
+                "substitutes_used": len(substituted_ingredients),
+                "not_found": len(not_found_ingredients),
+            },
         }
 
     @mcp.tool()
@@ -1231,6 +1587,142 @@ def register_tools(mcp: FastMCP) -> None:
             "is_fulfilled": fulfillment.get("recipe_fulfillment") == 1,
             "missing_products_count": fulfillment.get("missing_products_count", 0),
             "ingredients": ingredients_status,
+        }
+
+    # ==================== Ingredient Matching ====================
+
+    @mcp.tool()
+    async def find_ingredient_substitutes(
+        ingredient_name: str,
+        tolerance_ebc: float = 30.0,
+        min_score: float = 30.0,
+        include_stock: bool = True,
+    ) -> dict:
+        """
+        Find substitute products for a brewing ingredient.
+
+        For crystal/caramel malts, uses color matching (Lovibond/EBC).
+        For other ingredients, uses fuzzy name matching.
+
+        This is useful for:
+        - Finding equivalent malts based on color (e.g., "Crystal 60L" → "Crystal 150 EBC")
+        - Identifying products you already have that could substitute
+        - Recipe planning with available inventory
+
+        Args:
+            ingredient_name: The ingredient to find substitutes for
+            tolerance_ebc: EBC color tolerance for malt matching (default 30)
+            min_score: Minimum match score (0-100) to include (default 30)
+            include_stock: Include stock availability in results (default True)
+
+        Returns list of substitute matches sorted by score.
+        """
+        client = _get_client()
+
+        products = await client.get_products()
+        stock = await client.get_stock() if include_stock else None
+
+        # Parse color info from ingredient name
+        color_info = _parse_malt_color(ingredient_name)
+        is_crystal = _is_crystal_malt(ingredient_name)
+
+        substitutes = _find_ingredient_substitutes(
+            ingredient_name,
+            products,
+            stock,
+            tolerance_ebc=tolerance_ebc,
+        )
+
+        # Filter by minimum score
+        valid_substitutes = [s for s in substitutes if s["score"] >= min_score]
+
+        result = {
+            "ingredient": ingredient_name,
+            "is_crystal_malt": is_crystal,
+            "substitutes_found": len(valid_substitutes),
+            "substitutes": valid_substitutes[:10],  # Top 10
+        }
+
+        # Add color info if parsed
+        if color_info:
+            result["parsed_color"] = {
+                "lovibond": round(color_info["lovibond"], 1),
+                "ebc": round(color_info["ebc_mid"], 1),
+                "source": color_info["source"],
+            }
+
+        # Add recommendation
+        if valid_substitutes:
+            best = valid_substitutes[0]
+            if best["match_type"] == "exact":
+                result["recommendation"] = f"Exact match found: {best['product_name']}"
+            elif best["match_type"] == "color":
+                result["recommendation"] = (
+                    f"Color match: {best['product_name']} "
+                    f"({best['details'].get('product_ebc_range', '?')} EBC, "
+                    f"{best['details'].get('ebc_difference', '?')} EBC difference)"
+                )
+            else:
+                result["recommendation"] = f"Best fuzzy match: {best['product_name']} (score: {best['score']:.0f})"
+        else:
+            result["recommendation"] = "No suitable substitutes found"
+
+        return result
+
+    @mcp.tool()
+    async def convert_malt_color(
+        value: float,
+        from_unit: str = "lovibond",
+    ) -> dict:
+        """
+        Convert malt color between Lovibond and EBC units.
+
+        Common crystal malt reference points:
+        - Crystal 10L = 26 EBC (Very light)
+        - Crystal 40L = 105 EBC (Light)
+        - Crystal 60L = 158 EBC (Medium)
+        - Crystal 80L = 211 EBC (Medium-dark)
+        - Crystal 120L = 316 EBC (Dark)
+
+        Args:
+            value: The color value to convert
+            from_unit: Source unit - "lovibond" or "ebc" (default "lovibond")
+
+        Returns converted value in both units.
+        """
+        from_unit_lower = from_unit.lower()
+
+        if from_unit_lower in ["lovibond", "l", "°l"]:
+            lovibond = value
+            ebc = _lovibond_to_ebc(value)
+        elif from_unit_lower in ["ebc"]:
+            ebc = value
+            lovibond = _ebc_to_lovibond(value)
+        else:
+            return {"error": f"Unknown unit: {from_unit}. Use 'lovibond' or 'ebc'."}
+
+        # Get color description
+        if lovibond <= 10:
+            desc = "Very pale (Pilsner range)"
+        elif lovibond <= 20:
+            desc = "Pale/Light (Pale Ale range)"
+        elif lovibond <= 40:
+            desc = "Light amber"
+        elif lovibond <= 60:
+            desc = "Amber/Medium"
+        elif lovibond <= 80:
+            desc = "Medium-dark amber"
+        elif lovibond <= 120:
+            desc = "Dark amber/Brown"
+        elif lovibond <= 200:
+            desc = "Dark brown"
+        else:
+            desc = "Very dark (Stout range)"
+
+        return {
+            "lovibond": round(lovibond, 1),
+            "ebc": round(ebc, 1),
+            "description": desc,
         }
 
     # ==================== Chores ====================

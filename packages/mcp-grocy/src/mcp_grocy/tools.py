@@ -1,10 +1,170 @@
 """MCP tool definitions for Grocy."""
 
+import re
+
+import httpx
 from fastmcp import FastMCP
 
 from mcp_grocy.adapter import GrocyAdapter
 from mcp_grocy.client import GrocyClient
 from mcp_grocy.config import get_config
+
+
+async def _fetch_product_description_from_url(url: str) -> dict:
+    """
+    Fetch product description and metadata from a URL.
+
+    Args:
+        url: Product page URL
+
+    Returns:
+        Dictionary with extracted description and metadata, or error info.
+    """
+    try:
+        async with httpx.AsyncClient(timeout=15.0, follow_redirects=True) as client:
+            response = await client.get(
+                url,
+                headers={
+                    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+                    "Accept-Language": "en-US,en;q=0.5",
+                    "Accept-Encoding": "gzip, deflate, br",
+                    "DNT": "1",
+                    "Connection": "keep-alive",
+                    "Upgrade-Insecure-Requests": "1",
+                },
+            )
+            response.raise_for_status()
+            html = response.text
+
+            result = {}
+
+            # Extract meta description
+            meta_desc_match = re.search(
+                r'<meta[^>]*name=["\']description["\'][^>]*content=["\']([^"\']+)["\']',
+                html,
+                re.IGNORECASE,
+            )
+            if not meta_desc_match:
+                meta_desc_match = re.search(
+                    r'<meta[^>]*content=["\']([^"\']+)["\'][^>]*name=["\']description["\']',
+                    html,
+                    re.IGNORECASE,
+                )
+            if meta_desc_match:
+                result["meta_description"] = meta_desc_match.group(1).strip()
+
+            # Extract Open Graph description (often more detailed)
+            og_desc_match = re.search(
+                r'<meta[^>]*property=["\']og:description["\'][^>]*content=["\']([^"\']+)["\']',
+                html,
+                re.IGNORECASE,
+            )
+            if not og_desc_match:
+                og_desc_match = re.search(
+                    r'<meta[^>]*content=["\']([^"\']+)["\'][^>]*property=["\']og:description["\']',
+                    html,
+                    re.IGNORECASE,
+                )
+            if og_desc_match:
+                result["og_description"] = og_desc_match.group(1).strip()
+
+            # Try to extract product description from common e-commerce patterns
+            # Look for product description divs/sections
+            desc_patterns = [
+                r'<div[^>]*class="[^"]*product[_-]?description[^"]*"[^>]*>(.*?)</div>',
+                r'<div[^>]*class="[^"]*description[^"]*"[^>]*>(.*?)</div>',
+                r'<div[^>]*id="[^"]*description[^"]*"[^>]*>(.*?)</div>',
+                r'<section[^>]*class="[^"]*description[^"]*"[^>]*>(.*?)</section>',
+                # WooCommerce
+                r'<div[^>]*class="[^"]*woocommerce-product-details__short-description[^"]*"[^>]*>(.*?)</div>',
+            ]
+
+            for pattern in desc_patterns:
+                match = re.search(pattern, html, re.IGNORECASE | re.DOTALL)
+                if match:
+                    # Clean up HTML tags from the extracted text
+                    desc_html = match.group(1)
+                    # Remove HTML tags
+                    desc_text = re.sub(r'<[^>]+>', ' ', desc_html)
+                    # Clean up whitespace
+                    desc_text = re.sub(r'\s+', ' ', desc_text).strip()
+                    if len(desc_text) > 20:  # Only use if substantial
+                        result["product_description"] = desc_text[:1000]  # Limit length
+                        break
+
+            # Prefer product description, then OG, then meta
+            if "product_description" in result:
+                result["description"] = result["product_description"]
+            elif "og_description" in result:
+                result["description"] = result["og_description"]
+            elif "meta_description" in result:
+                result["description"] = result["meta_description"]
+
+            result["source_url"] = url
+            result["success"] = "description" in result
+
+            return result
+
+    except httpx.HTTPError as e:
+        return {"success": False, "error": f"HTTP error: {e}", "source_url": url}
+    except Exception as e:
+        return {"success": False, "error": f"Failed to fetch: {e}", "source_url": url}
+
+
+def _get_unit_for_category(category_name: str, units: list[dict]) -> int | None:
+    """
+    Get the appropriate quantity unit ID based on product category.
+
+    Args:
+        category_name: Name of the product category/group
+        units: List of available quantity units
+
+    Returns:
+        Unit ID for the category, or None if no match found.
+    """
+    if not category_name or not units:
+        return None
+
+    category_lower = category_name.lower()
+
+    # Build unit lookup by name (case-insensitive)
+    unit_by_name = {}
+    for u in units:
+        name = u.get("name", "").lower()
+        unit_by_name[name] = u["id"]
+        # Also check name_plural
+        name_plural = u.get("name_plural", "").lower()
+        if name_plural:
+            unit_by_name[name_plural] = u["id"]
+
+    # Category to unit mapping
+    # Grains/Malts and Hops should use grams
+    if any(kw in category_lower for kw in ["grain", "malt", "hop", "adjunct"]):
+        # Look for gram unit
+        for name in ["g", "gram", "grams", "gr"]:
+            if name in unit_by_name:
+                return unit_by_name[name]
+
+    # Yeast should use pieces
+    if "yeast" in category_lower:
+        for name in ["piece", "pieces", "pcs", "pack", "packs", "packet", "packets"]:
+            if name in unit_by_name:
+                return unit_by_name[name]
+
+    # Misc/Other - try to use piece as default for countable items
+    if any(kw in category_lower for kw in ["misc", "other", "equipment", "fining", "additive"]):
+        for name in ["piece", "pieces", "pcs"]:
+            if name in unit_by_name:
+                return unit_by_name[name]
+
+    # Liquids - try ml or L
+    if any(kw in category_lower for kw in ["liquid", "extract", "syrup"]):
+        for name in ["ml", "l", "liter", "litre", "milliliter", "millilitre"]:
+            if name in unit_by_name:
+                return unit_by_name[name]
+
+    return None
 
 
 def _get_client() -> GrocyClient:
@@ -1440,24 +1600,38 @@ def register_tools(mcp: FastMCP) -> None:
         product_group_id: int | None = None,
         min_stock_amount: float = 0,
         location_id: int | None = None,
+        source_url: str | None = None,
     ) -> dict:
         """
-        Create a new product.
+        Create a new product with smart defaults for brewing ingredients.
+
+        The quantity unit is automatically selected based on the product category:
+        - Grains/Malts/Hops/Adjuncts → grams (g)
+        - Yeast → pieces
+        - Liquids/Extracts → ml or L
+        - Other categories → pieces
+
+        If a source_url is provided and no description is given, the tool will
+        attempt to fetch the product description from the URL.
 
         Args:
             name: Product name
-            description: Product description
+            description: Product description (if not provided, will try to fetch from source_url)
             product_group_id: Product group ID (optional, can be found using get_product_groups)
             min_stock_amount: Minimum stock level
             location_id: Default location ID (optional, can be found using get_locations)
+            source_url: URL to product page (used to fetch description if not provided)
 
         Returns created product or error details.
         """
         client = _get_client()
 
+        # Fetch product groups for validation and unit selection
+        groups = await client.get_product_groups()
+        group_map = {g["id"]: g for g in groups}
+
         # Validate product_group_id if provided
         if product_group_id is not None:
-            groups = await client.get_product_groups()
             group_ids = [g["id"] for g in groups]
             if product_group_id not in group_ids:
                 return {
@@ -1487,25 +1661,66 @@ def register_tools(mcp: FastMCP) -> None:
             # Use first location as default if none specified
             location_id = locations[0]["id"]
 
-        # Get default quantity unit
+        # Get quantity units
         units = await client.get_quantity_units()
         default_unit = units[0]["id"] if units else 1
 
+        # Select appropriate unit based on product category
+        selected_unit = default_unit
+        category_name = None
+        if product_group_id is not None and product_group_id in group_map:
+            category_name = group_map[product_group_id].get("name", "")
+            category_unit = _get_unit_for_category(category_name, units)
+            if category_unit is not None:
+                selected_unit = category_unit
+
+        # If no description provided but source_url is, try to fetch it
+        url_fetch_result = None
+        final_description = description
+        if source_url and not description:
+            url_fetch_result = await _fetch_product_description_from_url(source_url)
+            if url_fetch_result.get("success") and url_fetch_result.get("description"):
+                final_description = url_fetch_result["description"]
+                # Append source URL to description
+                final_description = f"{final_description}\n\nSource: {source_url}"
+
         product_data = {
             "name": name,
-            "qu_id_purchase": default_unit,
-            "qu_id_stock": default_unit,
+            "qu_id_purchase": selected_unit,
+            "qu_id_stock": selected_unit,
             "min_stock_amount": min_stock_amount,
-            "location_id": location_id,  # Always required
+            "location_id": location_id,
         }
-        if description:
-            product_data["description"] = description
+        if final_description:
+            product_data["description"] = final_description
         if product_group_id is not None:
             product_data["product_group_id"] = product_group_id
 
+        # Find unit name for response
+        unit_name = "unknown"
+        for u in units:
+            if u["id"] == selected_unit:
+                unit_name = u.get("name", "unknown")
+                break
+
         try:
             result = await client.create_product(product_data)
-            return {"success": True, "product": result}
+            response = {
+                "success": True,
+                "product": result,
+                "unit_selected": unit_name,
+            }
+            if category_name:
+                response["category"] = category_name
+            if url_fetch_result:
+                response["url_fetch"] = {
+                    "attempted": True,
+                    "success": url_fetch_result.get("success", False),
+                    "source_url": source_url,
+                }
+                if not url_fetch_result.get("success"):
+                    response["url_fetch"]["error"] = url_fetch_result.get("error")
+            return response
         except Exception as e:
             # Return detailed error information
             return {
@@ -1513,6 +1728,201 @@ def register_tools(mcp: FastMCP) -> None:
                 "error": str(e),
                 "product_data_sent": product_data,
             }
+
+    @mcp.tool()
+    async def update_product(
+        product_id: int,
+        name: str | None = None,
+        description: str | None = None,
+        product_group_id: int | None = None,
+        min_stock_amount: float | None = None,
+        location_id: int | None = None,
+        source_url: str | None = None,
+        fix_unit_from_category: bool = False,
+    ) -> dict:
+        """
+        Update an existing product's details.
+
+        Use fix_unit_from_category=True to automatically set the quantity unit
+        based on the product's category (grains/hops → grams, yeast → pieces).
+
+        Args:
+            product_id: Product ID to update
+            name: New product name (optional)
+            description: New description (optional, or fetch from source_url)
+            product_group_id: New product group ID (optional)
+            min_stock_amount: New minimum stock level (optional)
+            location_id: New default location ID (optional)
+            source_url: URL to fetch description from (if description not provided)
+            fix_unit_from_category: If True, automatically set quantity unit based on category
+
+        Returns updated product details.
+        """
+        client = _get_client()
+
+        # Get current product
+        try:
+            current = await client.get_entity("products", product_id)
+        except Exception as e:
+            return {"error": f"Product {product_id} not found: {e}"}
+
+        # Build update data
+        update_data = {}
+
+        if name is not None:
+            update_data["name"] = name
+
+        # Handle description - fetch from URL if needed
+        if description is not None:
+            update_data["description"] = description
+        elif source_url:
+            url_result = await _fetch_product_description_from_url(source_url)
+            if url_result.get("success") and url_result.get("description"):
+                update_data["description"] = f"{url_result['description']}\n\nSource: {source_url}"
+
+        if product_group_id is not None:
+            update_data["product_group_id"] = product_group_id
+
+        if min_stock_amount is not None:
+            update_data["min_stock_amount"] = min_stock_amount
+
+        if location_id is not None:
+            update_data["location_id"] = location_id
+
+        # Fix quantity unit based on category
+        if fix_unit_from_category:
+            groups = await client.get_product_groups()
+            group_map = {g["id"]: g for g in groups}
+            units = await client.get_quantity_units()
+
+            # Use new product_group_id if provided, else current
+            group_id = product_group_id if product_group_id is not None else current.get("product_group_id")
+            if group_id and group_id in group_map:
+                category_name = group_map[group_id].get("name", "")
+                category_unit = _get_unit_for_category(category_name, units)
+                if category_unit is not None:
+                    update_data["qu_id_purchase"] = category_unit
+                    update_data["qu_id_stock"] = category_unit
+
+        if not update_data:
+            return {"success": True, "message": "No changes to apply", "product_id": product_id}
+
+        try:
+            await client.update_entity("products", product_id, update_data)
+
+            # Get unit name for response
+            unit_name = None
+            if "qu_id_stock" in update_data:
+                units = await client.get_quantity_units()
+                for u in units:
+                    if u["id"] == update_data["qu_id_stock"]:
+                        unit_name = u.get("name")
+                        break
+
+            response = {
+                "success": True,
+                "product_id": product_id,
+                "updated_fields": list(update_data.keys()),
+            }
+            if unit_name:
+                response["new_unit"] = unit_name
+            return response
+        except Exception as e:
+            return {"success": False, "error": str(e), "product_id": product_id}
+
+    @mcp.tool()
+    async def fix_product_units_by_category(
+        category: str | None = None,
+        dry_run: bool = True,
+    ) -> dict:
+        """
+        Fix quantity units for products based on their category.
+
+        This updates products in the specified category to use the appropriate unit:
+        - Grains/Malts/Hops/Adjuncts → grams (g)
+        - Yeast → pieces
+        - Liquids/Extracts → ml or L
+
+        Args:
+            category: Category to fix (e.g., "Grains", "Hops"). If not specified, fixes all.
+            dry_run: If True (default), only report what would change without making changes.
+
+        Returns summary of changes made or planned.
+        """
+        client = _get_client()
+
+        products = await client.get_products()
+        groups = await client.get_product_groups()
+        units = await client.get_quantity_units()
+
+        group_map = {g["id"]: g for g in groups}
+        unit_map = {u["id"]: u.get("name") for u in units}
+
+        # Filter by category if specified
+        if category:
+            category_lower = category.lower()
+            target_group_ids = [
+                g["id"] for g in groups
+                if category_lower in g.get("name", "").lower()
+            ]
+            products = [
+                p for p in products
+                if p.get("product_group_id") in target_group_ids
+            ]
+
+        changes = []
+        errors = []
+
+        for product in products:
+            product_id = product["id"]
+            product_name = product.get("name", "Unknown")
+            group_id = product.get("product_group_id")
+            current_unit_id = product.get("qu_id_stock")
+            current_unit_name = unit_map.get(current_unit_id, "unknown")
+
+            if not group_id or group_id not in group_map:
+                continue
+
+            category_name = group_map[group_id].get("name", "")
+            expected_unit_id = _get_unit_for_category(category_name, units)
+
+            if expected_unit_id is None:
+                continue
+
+            if current_unit_id != expected_unit_id:
+                expected_unit_name = unit_map.get(expected_unit_id, "unknown")
+                change = {
+                    "product_id": product_id,
+                    "product_name": product_name,
+                    "category": category_name,
+                    "current_unit": current_unit_name,
+                    "expected_unit": expected_unit_name,
+                }
+
+                if not dry_run:
+                    try:
+                        await client.update_entity("products", product_id, {
+                            "qu_id_purchase": expected_unit_id,
+                            "qu_id_stock": expected_unit_id,
+                        })
+                        change["status"] = "fixed"
+                    except Exception as e:
+                        change["status"] = "error"
+                        change["error"] = str(e)
+                        errors.append(change)
+                        continue
+                else:
+                    change["status"] = "would_fix"
+
+                changes.append(change)
+
+        return {
+            "dry_run": dry_run,
+            "products_checked": len(products),
+            "changes_needed": len(changes),
+            "errors": len(errors),
+            "changes": changes,
+        }
 
     # ==================== Generic CRUD ====================
 

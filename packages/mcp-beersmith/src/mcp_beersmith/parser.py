@@ -1083,16 +1083,75 @@ class BeerSmithParser:
         # Create a Table (folder) structure for "MCP Created" if it doesn't exist
         folder_name = "MCP Created"
 
-        # Check if the "MCP Created" folder already exists
-        mcp_folder_pattern = r'<Table>.*?<Name>MCP Created</Name>.*?<Data>(.*?)</Data>.*?</Table>'
-        folder_match = re.search(mcp_folder_pattern, content, re.DOTALL)
+        # Use XML parsing to find the MCP Created folder correctly
+        # Wrap content in root element to handle multiple root elements
+        wrapped_content = f"<root>{content}</root>"
 
-        if folder_match:
-            # Folder exists - insert the recipe into it
-            # Find the position right before the closing </Data> of the MCP Created folder
-            folder_data_end = folder_match.end(1)  # End of the Data content
-            new_content = content[:folder_data_end] + recipe_xml + content[folder_data_end:]
-        else:
+        try:
+            parser = etree.XMLParser(recover=True, encoding='utf-8')
+            root = etree.fromstring(wrapped_content.encode('utf-8'), parser=parser)
+
+            # Find the MCP Created table
+            mcp_table = None
+            for table in root.findall('.//Table'):
+                name_elem = table.find('Name')
+                if name_elem is not None and name_elem.text == 'MCP Created':
+                    mcp_table = table
+                    break
+
+            if mcp_table is not None:
+                # Found the MCP Created folder
+                # Find its Data element
+                data_elem = mcp_table.find('Data')
+                if data_elem is not None:
+                    # Convert data_elem back to string to find its position in original content
+                    # We need to find where to insert within this Data element
+                    data_start_tag = '<Data>'
+                    data_end_tag = '</Data>'
+
+                    # Find the Data section for MCP Created table in the original content
+                    # Search for the pattern: <Name>MCP Created</Name>...<Data>
+                    table_name_pos = content.find('<Name>MCP Created</Name>')
+                    if table_name_pos > 0:
+                        # Find the <Data> tag after this table name
+                        data_start_pos = content.find('<Data>', table_name_pos)
+                        if data_start_pos > 0:
+                            # Now find the MATCHING </Data> for this <Data>
+                            # We need to count nested Data tags
+                            search_pos = data_start_pos + len('<Data>')
+                            depth = 1
+                            while depth > 0 and search_pos < len(content):
+                                next_open = content.find('<Data>', search_pos)
+                                next_close = content.find('</Data>', search_pos)
+
+                                if next_close == -1:
+                                    break
+
+                                if next_open != -1 and next_open < next_close:
+                                    depth += 1
+                                    search_pos = next_open + len('<Data>')
+                                else:
+                                    depth -= 1
+                                    if depth == 0:
+                                        # Found the matching </Data>
+                                        new_content = content[:next_close] + recipe_xml + content[next_close:]
+                                        break
+                                    search_pos = next_close + len('</Data>')
+                            else:
+                                raise ValueError("Could not find matching </Data> tag for MCP Created folder")
+                        else:
+                            raise ValueError("Could not find <Data> tag for MCP Created folder")
+                    else:
+                        raise ValueError("Could not find MCP Created folder in content")
+                else:
+                    raise ValueError("MCP Created table has no Data element")
+            else:
+                # MCP Created folder doesn't exist - will create it below
+                folder_match = None
+        except Exception as e:
+            raise ValueError(f"Error parsing Recipe.bsmx for folder location: {e}")
+
+        if mcp_table is None:
             # Folder doesn't exist - create it with the recipe inside
             folder_xml = f"""<Table><_PERMID_>9999</_PERMID_>
 <_MOD_>{datetime.now().strftime('%Y-%m-%d')}</_MOD_>

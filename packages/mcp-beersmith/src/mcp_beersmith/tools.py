@@ -379,21 +379,25 @@ def register_tools(mcp: FastMCP) -> None:
 
         # Save recipe
         try:
-            # Add recipe directly to BeerSmith's Recipe.bsmx
-            parser.add_recipe_to_beersmith(recipe)
-
-            # Also save as exportable file for backup
+            # Also save as exportable file for backup FIRST
             parser.save_recipe(recipe)
             export_path = parser.beersmith_path / "MCP_Exports"
+
+            # Add recipe directly to BeerSmith's Recipe.bsmx
+            try:
+                parser.add_recipe_to_beersmith(recipe)
+                database_status = "✅ Added to BeerSmith database"
+            except Exception as db_error:
+                database_status = f"⚠️  Database write failed: {str(db_error)}\n   Recipe exported to {export_path} but not added to database"
 
             warning_text = "\n\n".join(warnings) if warnings else ""
             warning_section = f"\n\n{warning_text}" if warnings else ""
 
             return (
                 f"✅ Recipe '{name}' created successfully!\n\n"
-                f"The recipe has been added to BeerSmith and should appear in your recipe list.\n"
-                f"Look for it in the '/MCP Created/' folder.\n\n"
-                f"A backup copy was also saved to: {export_path}\n\n"
+                f"{database_status}\n\n"
+                f"Look for it in the '/MCP Created/' folder.\n"
+                f"A backup copy was saved to: {export_path}\n\n"
                 f"**Recipe Parameters:**\n"
                 f"- Boil Time: {boil_time} minutes\n"
                 f"- Grains: {len(recipe.grains)} ({sum(g.amount_oz for g in recipe.grains) * 0.0283495:.2f} kg)\n"
@@ -404,7 +408,8 @@ def register_tools(mcp: FastMCP) -> None:
                 f"BeerSmith will calculate OG, FG, ABV, and IBU based on your grain bill and equipment settings."
             )
         except Exception as e:
-            return f"Error saving recipe: {e}"
+            import traceback
+            return f"Error saving recipe: {e}\n\nTraceback:\n{traceback.format_exc()}"
 
     @mcp.tool()
     def list_hops(search: str | None = None, hop_type: int | None = None) -> list[dict]:

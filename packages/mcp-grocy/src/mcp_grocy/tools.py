@@ -297,33 +297,500 @@ def _calculate_color_match_score(
     return max(0, 100 - (distance / tolerance * 50))
 
 
+# ==================== Maltster Brand Matching ====================
+
+# Known maltster/supplier brands - these should NOT be fuzzy matched across
+MALTSTER_BRANDS = [
+    # German
+    "bestmalz", "best",  # BESTMALZ (German)
+    "weyermann",
+    # UK
+    "simpsons", "simpson",
+    "crisp",
+    "thomas fawcett", "fawcett",
+    "warminster",
+    "muntons",
+    "pauls malt", "pauls",
+    # Belgian
+    "castle malting", "château", "chateau",
+    # US
+    "briess",
+    "great western",
+    "rahr",
+    # Other
+    "dingemans",
+    "franco-belges",
+    "malt craft",  # Australia
+    "gladfield",  # New Zealand
+]
+
+
+def _extract_maltster(name: str) -> str | None:
+    """
+    Extract maltster/supplier brand from an ingredient name.
+
+    Args:
+        name: Ingredient name (e.g., "BEST Pale Ale", "Simpsons Golden Promise")
+
+    Returns:
+        Maltster brand name (lowercase) if found, None otherwise.
+    """
+    if not name:
+        return None
+
+    name_lower = name.lower()
+
+    for brand in MALTSTER_BRANDS:
+        if brand in name_lower:
+            # Return the canonical brand name
+            # Map aliases to canonical names
+            if brand in ["best", "bestmalz"]:
+                return "bestmalz"
+            if brand in ["simpson", "simpsons"]:
+                return "simpsons"
+            if brand in ["fawcett", "thomas fawcett"]:
+                return "thomas fawcett"
+            if brand in ["château", "chateau", "castle malting"]:
+                return "castle malting"
+            if brand in ["pauls", "pauls malt"]:
+                return "pauls malt"
+            return brand
+
+    return None
+
+
+def _is_same_maltster(name1: str, name2: str) -> bool:
+    """
+    Check if two ingredient names are from the same maltster.
+
+    Returns True if:
+    - Both have the same maltster brand
+    - Neither has a maltster brand (generic products)
+    - Only one has a maltster brand (can't determine)
+
+    Returns False if:
+    - Both have different maltster brands
+    """
+    maltster1 = _extract_maltster(name1)
+    maltster2 = _extract_maltster(name2)
+
+    # If both have maltsters, they must match
+    if maltster1 and maltster2:
+        return maltster1 == maltster2
+
+    # Otherwise, allow matching (at least one is generic)
+    return True
+
+
+# ==================== Yeast Matching Utilities ====================
+
+# Regex patterns for extracting yeast product IDs
+YEAST_ID_PATTERNS = {
+    "fermentis": [
+        r"\b(US-?\d{2})\b",  # US-05, US05
+        r"\b(S-?\d{2,3})\b",  # S-04, S-33, S-189
+        r"\b(K-?\d{2})\b",  # K-97
+        r"\b(W-?\d{2})\b",  # W-34/70
+        r"\bSafale\s+(US-?\d{2})\b",
+        r"\bSaflager\s+(S-?\d{2,3}|W-?\d{2})\b",
+    ],
+    "white_labs": [
+        r"\b(WLP\d{3})\b",  # WLP001
+    ],
+    "wyeast": [
+        r"\b(\d{4})\b(?=.*(?:wyeast|activator))",  # 1056 (with context)
+        r"\bWyeast\s+(\d{4})\b",  # Wyeast 1056
+    ],
+    "mangrove_jacks": [
+        r"\b(M\d{2})\b",  # M47
+        r"\bMangrove\s+Jack(?:'?s)?\s+(M\d{2})\b",
+    ],
+    "lallemand": [
+        r"\b(BRY-?\d+)\b",  # BRY-97
+        r"\b(CBC-?\d+)\b",  # CBC-1
+        r"\bLalBrew\s+(\w+)\b",
+    ],
+    "omega": [
+        r"\b(OYL-?\d{3})\b",  # OYL-057
+    ],
+    "imperial": [
+        r"\bImperial\s+(A\d{2})\b",  # Imperial A01
+        r"\b(A\d{2})\b(?=.*imperial)",
+    ],
+}
+
+# Known yeast functional equivalents (same or very similar strains)
+YEAST_EQUIVALENTS = {
+    # American Ale / Chico strain
+    "us-05": ["wlp001", "wyeast 1056", "1056", "safale us-05", "bry-97"],
+    "wlp001": ["us-05", "wyeast 1056", "1056", "safale us-05"],
+    "1056": ["us-05", "wlp001", "safale us-05"],
+    # English Ale
+    "s-04": ["wlp007", "wyeast 1098", "1098"],
+    "wlp007": ["s-04", "wyeast 1098", "1098"],
+    "1098": ["s-04", "wlp007"],
+    # Belgian Abbey
+    "m47": ["wlp550", "wyeast 3522", "3522"],
+    "wlp550": ["m47", "wyeast 3522", "3522"],
+    "3522": ["m47", "wlp550"],
+    # German Lager
+    "w-34/70": ["wlp830", "wyeast 2124", "2124", "s-189"],
+    "s-189": ["w-34/70", "wlp830", "wyeast 2124"],
+    "wlp830": ["w-34/70", "s-189", "wyeast 2124"],
+    "2124": ["w-34/70", "s-189", "wlp830"],
+    # Hefeweizen
+    "wlp300": ["wyeast 3068", "3068"],
+    "3068": ["wlp300"],
+    # Kveik
+    "oyl-061": ["voss kveik"],
+}
+
+
+def _normalize_yeast_id(yeast_id: str) -> str:
+    """Normalize a yeast ID for comparison."""
+    if not yeast_id:
+        return ""
+    # Remove spaces and hyphens, lowercase
+    return yeast_id.lower().replace("-", "").replace(" ", "")
+
+
+def _extract_yeast_id(name: str) -> dict | None:
+    """
+    Extract yeast product ID from a name.
+
+    Args:
+        name: Product name (e.g., "US-05", "Safale American Ale US-05", "Wyeast 1272")
+
+    Returns:
+        Dictionary with id, lab, normalized_id, or None if not found.
+    """
+    if not name:
+        return None
+
+    name_upper = name.upper()
+
+    for lab, patterns in YEAST_ID_PATTERNS.items():
+        for pattern in patterns:
+            match = re.search(pattern, name_upper, re.IGNORECASE)
+            if match:
+                yeast_id = match.group(1)
+                return {
+                    "id": yeast_id.upper(),
+                    "lab": lab,
+                    "normalized": _normalize_yeast_id(yeast_id),
+                }
+
+    return None
+
+
+def _get_yeast_equivalents(yeast_id: str) -> list[str]:
+    """Get list of equivalent yeast strains for a given ID."""
+    normalized = _normalize_yeast_id(yeast_id)
+
+    for key, equivalents in YEAST_EQUIVALENTS.items():
+        if _normalize_yeast_id(key) == normalized:
+            return equivalents
+        if normalized in [_normalize_yeast_id(e) for e in equivalents]:
+            # Return the key plus other equivalents
+            return [key] + [e for e in equivalents if _normalize_yeast_id(e) != normalized]
+
+    return []
+
+
+def _is_yeast_product(name: str) -> bool:
+    """Check if a product name indicates it's a yeast product."""
+    name_lower = name.lower()
+    yeast_keywords = [
+        "yeast", "ale yeast", "lager yeast", "safale", "saflager",
+        "wyeast", "white labs", "wlp", "mangrove jack", "lallemand",
+        "lalbrew", "fermentis", "omega", "imperial yeast", "kveik",
+        "starter", "activator", "dry yeast", "liquid yeast",
+    ]
+    return any(kw in name_lower for kw in yeast_keywords) or _extract_yeast_id(name) is not None
+
+
+def _map_lab_name(lab_name: str) -> str:
+    """
+    Map BeerSmith lab names to canonical lab identifiers used in YEAST_ID_PATTERNS.
+
+    BeerSmith uses various lab name formats that need to be normalized.
+    """
+    if not lab_name:
+        return "unknown"
+
+    lab_lower = lab_name.lower()
+
+    # Map common variations to canonical names
+    lab_mappings = {
+        # Fermentis / Safale / Saflager
+        "fermentis": "fermentis",
+        "safale": "fermentis",
+        "saflager": "fermentis",
+        "lesaffre": "fermentis",
+        # White Labs
+        "white labs": "white_labs",
+        "whitelabs": "white_labs",
+        "wlp": "white_labs",
+        # Wyeast
+        "wyeast": "wyeast",
+        "wyeast laboratories": "wyeast",
+        # Mangrove Jack's
+        "mangrove jack": "mangrove_jacks",
+        "mangrove jacks": "mangrove_jacks",
+        "mangrove jack's": "mangrove_jacks",
+        # Lallemand
+        "lallemand": "lallemand",
+        "lalbrew": "lallemand",
+        "lalvin": "lallemand",
+        # Omega
+        "omega": "omega",
+        "omega yeast": "omega",
+        "omega yeast labs": "omega",
+        # Imperial
+        "imperial": "imperial",
+        "imperial yeast": "imperial",
+        "imperial organic yeast": "imperial",
+    }
+
+    for pattern, canonical in lab_mappings.items():
+        if pattern in lab_lower:
+            return canonical
+
+    return lab_lower
+
+
+def _match_yeast(
+    ingredient_name: str,
+    products: list[dict],
+    stock: list[dict] | None = None,
+    # BeerSmith metadata (optional)
+    lab: str | None = None,  # Yeast lab (e.g., "Fermentis", "White Labs")
+    yeast_product_id: str | None = None,  # Yeast product ID (e.g., "US-05", "WLP001")
+) -> list[dict]:
+    """
+    Match yeast ingredient using multi-level strategy.
+
+    When BeerSmith metadata (lab, yeast_product_id) is provided, it takes precedence
+    over text parsing for more accurate matching.
+
+    Matching levels:
+    1. Product ID exact match (e.g., "US-05" in name)
+    2. Lab + name fuzzy match
+    3. High-threshold fuzzy name match
+    4. Functional equivalents (suggest but don't auto-match)
+
+    Args:
+        ingredient_name: Yeast name to match
+        products: List of Grocy products
+        stock: Optional stock info
+        lab: BeerSmith yeast lab (optional)
+        yeast_product_id: BeerSmith yeast product ID, e.g. "US-05" (optional)
+
+    Returns:
+        List of matches with scores and match types.
+    """
+    matches = []
+    stock_map = {s.get("product_id"): s for s in (stock or [])}
+
+    # Use BeerSmith yeast_product_id if provided, otherwise extract from name
+    if yeast_product_id:
+        # BeerSmith provides the product ID directly
+        ingredient_normalized = _normalize_yeast_id(yeast_product_id)
+        ingredient_yeast = {
+            "id": yeast_product_id.upper(),
+            "lab": _map_lab_name(lab) if lab else "unknown",
+            "normalized": ingredient_normalized,
+            "source": "beersmith",
+        }
+    else:
+        # Fall back to text parsing
+        ingredient_yeast = _extract_yeast_id(ingredient_name)
+        ingredient_normalized = ingredient_yeast["normalized"] if ingredient_yeast else None
+
+    # If lab provided but no yeast_product_id, use it for lab matching
+    beersmith_lab = _map_lab_name(lab) if lab else None
+
+    for product in products:
+        product_name = product.get("name", "")
+        product_id = product.get("id")
+
+        # Only consider yeast products
+        if not _is_yeast_product(product_name):
+            continue
+
+        match_info = {
+            "product_id": product_id,
+            "product_name": product_name,
+            "score": 0,
+            "match_type": None,
+            "details": {},
+        }
+
+        # Add stock info
+        if stock_map and product_id in stock_map:
+            match_info["stock_amount"] = stock_map[product_id].get("amount", 0)
+
+        # Level 1: Product ID exact match
+        product_yeast = _extract_yeast_id(product_name)
+        if ingredient_normalized and product_yeast:
+            if ingredient_normalized == product_yeast["normalized"]:
+                match_info["score"] = 100
+                match_info["match_type"] = "yeast_id"
+                match_info["details"] = {
+                    "matched_id": product_yeast["id"],
+                    "lab": product_yeast["lab"],
+                }
+                matches.append(match_info)
+                continue
+
+        # Level 2: Lab match + name similarity
+        if ingredient_yeast and product_yeast:
+            if ingredient_yeast["lab"] == product_yeast["lab"]:
+                # Same lab, check name similarity
+                ing_lower = ingredient_name.lower()
+                prod_lower = product_name.lower()
+
+                # Check for common words
+                ing_words = set(ing_lower.replace("-", " ").split())
+                prod_words = set(prod_lower.replace("-", " ").split())
+                filler = {"yeast", "ale", "lager", "dry", "liquid", "the", "a"}
+                ing_words -= filler
+                prod_words -= filler
+
+                if ing_words and prod_words:
+                    overlap = len(ing_words & prod_words)
+                    if overlap >= 2:
+                        match_info["score"] = 80
+                        match_info["match_type"] = "lab_name"
+                        match_info["details"]["lab"] = ingredient_yeast["lab"]
+                        matches.append(match_info)
+                        continue
+
+        # Level 3: High-threshold fuzzy name matching
+        ing_lower = ingredient_name.lower()
+        prod_lower = product_name.lower()
+
+        # Check for significant word overlap
+        ing_words = set(ing_lower.replace("-", " ").replace("/", " ").split())
+        prod_words = set(prod_lower.replace("-", " ").replace("/", " ").split())
+        filler = {"yeast", "the", "a", "an", "-", "/"}
+        ing_words -= filler
+        prod_words -= filler
+
+        if ing_words and prod_words:
+            overlap = len(ing_words & prod_words)
+            total = len(ing_words | prod_words)
+            if overlap > 0:
+                word_score = (overlap / total) * 100
+                # Only accept high confidence matches for yeast
+                if word_score >= 60:
+                    match_info["score"] = word_score * 0.7  # Cap at 70 for fuzzy
+                    match_info["match_type"] = "fuzzy_name"
+                    match_info["details"]["matching_words"] = list(ing_words & prod_words)
+                    matches.append(match_info)
+
+    # Level 4: Check for functional equivalents in unmatched products
+    if ingredient_normalized:
+        equivalents = _get_yeast_equivalents(ingredient_normalized)
+        if equivalents:
+            for product in products:
+                product_name = product.get("name", "")
+                product_id = product.get("id")
+
+                # Skip if already matched
+                if any(m["product_id"] == product_id for m in matches):
+                    continue
+
+                product_yeast = _extract_yeast_id(product_name)
+                if product_yeast:
+                    for equiv in equivalents:
+                        if _normalize_yeast_id(equiv) == product_yeast["normalized"]:
+                            match_info = {
+                                "product_id": product_id,
+                                "product_name": product_name,
+                                "score": 40,  # Lower score for equivalents
+                                "match_type": "equivalent",
+                                "details": {
+                                    "equivalent_to": ingredient_yeast["id"] if ingredient_yeast else ingredient_name,
+                                    "matched_id": product_yeast["id"],
+                                },
+                            }
+                            if stock_map and product_id in stock_map:
+                                match_info["stock_amount"] = stock_map[product_id].get("amount", 0)
+                            matches.append(match_info)
+                            break
+
+    # Sort by score
+    matches.sort(key=lambda x: x["score"], reverse=True)
+    return matches
+
+
 def _find_ingredient_substitutes(
     ingredient_name: str,
     products: list[dict],
     stock: list[dict] | None = None,
     tolerance_ebc: float = 30.0,
+    # BeerSmith metadata (optional) - takes precedence over text parsing
+    supplier: str | None = None,  # Grain supplier/maltster
+    lab: str | None = None,  # Yeast lab
+    product_id: str | None = None,  # Yeast product ID
+    color_lovibond: float | None = None,  # Grain color
 ) -> list[dict]:
     """
     Find suitable substitute products for an ingredient.
 
-    For crystal/caramel malts, matches based on color specifications.
-    For other ingredients, uses fuzzy name matching.
+    Matching strategy:
+    - Yeast: Uses specialized yeast ID matching with equivalents
+    - Crystal/caramel malts: Matches based on color specifications
+    - Malts with maltster brands: Only matches within same maltster
+    - Other ingredients: Uses fuzzy name matching
+
+    When BeerSmith metadata is provided (supplier, lab, product_id), it takes
+    precedence over text parsing for more accurate matching.
 
     Args:
         ingredient_name: The ingredient name to find substitutes for
         products: List of Grocy products
         stock: Optional list of stock entries for availability info
         tolerance_ebc: EBC tolerance for color matching (default 30)
+        supplier: BeerSmith grain supplier/maltster (optional)
+        lab: BeerSmith yeast lab (optional)
+        product_id: BeerSmith yeast product ID (optional)
+        color_lovibond: BeerSmith grain color in Lovibond (optional)
 
     Returns:
         List of substitute matches with scores and details.
     """
+    # Check if this is a yeast ingredient - use specialized matching
+    if lab or product_id or _is_yeast_product(ingredient_name):
+        return _match_yeast(ingredient_name, products, stock, lab=lab, yeast_product_id=product_id)
+
     substitutes = []
     stock_map = {s.get("product_id"): s for s in (stock or [])}
 
-    # Parse color from ingredient name
-    ingredient_color = _parse_malt_color(ingredient_name)
+    # Use BeerSmith color if provided, otherwise parse from name
+    if color_lovibond is not None:
+        ebc = _lovibond_to_ebc(color_lovibond)
+        ingredient_color = {
+            "lovibond": color_lovibond,
+            "ebc_min": ebc,
+            "ebc_max": ebc,
+            "ebc_mid": ebc,
+            "source": "beersmith",
+        }
+    else:
+        ingredient_color = _parse_malt_color(ingredient_name)
+
     is_crystal = _is_crystal_malt(ingredient_name)
+
+    # Use BeerSmith supplier if provided, otherwise extract from name
+    # Normalize supplier names for comparison
+    if supplier:
+        # Map BeerSmith supplier names to our canonical names
+        supplier_lower = supplier.lower()
+        ingredient_maltster = _extract_maltster(supplier) or supplier_lower
+    else:
+        ingredient_maltster = _extract_maltster(ingredient_name)
 
     for product in products:
         product_name = product.get("name", "")
@@ -341,6 +808,45 @@ def _find_ingredient_substitutes(
         # Add stock info if available
         if stock_map and product_id in stock_map:
             match_info["stock_amount"] = stock_map[product_id].get("amount", 0)
+
+        # Check maltster brand compatibility
+        # If ingredient has a maltster brand, only match products from same maltster
+        product_maltster = _extract_maltster(product_name)
+        if ingredient_maltster and product_maltster:
+            if ingredient_maltster != product_maltster:
+                # Different maltsters - skip this product for fuzzy matching
+                # But still allow exact matches
+                name_lower = ingredient_name.lower()
+                product_name_lower = product_name.lower()
+                if name_lower == product_name_lower:
+                    match_info["score"] = 100
+                    match_info["match_type"] = "exact"
+                    substitutes.append(match_info)
+                # Otherwise, add as a "different_maltster" suggestion with low score
+                elif ingredient_maltster and product_maltster:
+                    # Only suggest if there's some name similarity
+                    name_words = set(name_lower.replace("-", " ").replace("/", " ").split())
+                    product_words = set(product_name_lower.replace("-", " ").replace("/", " ").split())
+                    filler = {"malt", "malts", "the", "a", "an", "-", "/"}
+                    name_words -= filler
+                    product_words -= filler
+                    # Remove maltster words
+                    maltster_words = set(ingredient_maltster.split()) | set(product_maltster.split())
+                    name_words -= maltster_words
+                    product_words -= maltster_words
+
+                    if name_words and product_words:
+                        overlap = len(name_words & product_words)
+                        if overlap >= 2:  # At least 2 words must match
+                            match_info["score"] = 30  # Low score - different maltster
+                            match_info["match_type"] = "different_maltster"
+                            match_info["details"] = {
+                                "requested_maltster": ingredient_maltster,
+                                "product_maltster": product_maltster,
+                                "warning": "Different maltster - manual verification recommended",
+                            }
+                            substitutes.append(match_info)
+                continue
 
         # For crystal malts with color info, try color matching
         if is_crystal and ingredient_color and _is_crystal_malt(product_name):
@@ -380,11 +886,19 @@ def _find_ingredient_substitutes(
             substitutes.append(match_info)
             continue
 
-        # Contains match
+        # Contains match - but be careful with maltster brands
         if name_lower in product_name_lower:
-            match_info["score"] = 85
-            match_info["match_type"] = "contains"
-            substitutes.append(match_info)
+            # If ingredient has a maltster, require it to be present in product too
+            if ingredient_maltster:
+                if ingredient_maltster in product_name_lower:
+                    match_info["score"] = 85
+                    match_info["match_type"] = "contains"
+                    substitutes.append(match_info)
+                # Otherwise skip - don't match "BEST Pale Ale" to "Simpsons Best Pale Ale"
+            else:
+                match_info["score"] = 85
+                match_info["match_type"] = "contains"
+                substitutes.append(match_info)
             continue
 
         if product_name_lower in name_lower:
@@ -401,6 +915,15 @@ def _find_ingredient_substitutes(
         filler_words = {"malt", "malts", "the", "a", "an", "-", "/"}
         name_words -= filler_words
         product_words -= filler_words
+
+        # Remove maltster brand words to prevent "BEST Pale Ale" matching "Simpsons Best Pale Ale"
+        # because "best" appears in both but means different things
+        if ingredient_maltster:
+            maltster_words = set(ingredient_maltster.split())
+            name_words -= maltster_words
+        if product_maltster:
+            maltster_words = set(product_maltster.split())
+            product_words -= maltster_words
 
         if name_words and product_words:
             overlap = len(name_words & product_words)
@@ -424,41 +947,82 @@ async def _smart_match_ingredient(
     products: list[dict],
     stock: list[dict] | None = None,
     min_score: float = 50.0,
+    # BeerSmith metadata (optional)
+    supplier: str | None = None,  # Grain supplier/maltster (e.g., "BESTMALZ", "Simpsons")
+    origin: str | None = None,  # Ingredient origin country
+    lab: str | None = None,  # Yeast lab (e.g., "Fermentis", "White Labs")
+    product_id: str | None = None,  # Yeast product ID (e.g., "US-05", "WLP001")
+    color_lovibond: float | None = None,  # Grain color in Lovibond
 ) -> dict:
     """
     Smart ingredient matching with color awareness for brewing ingredients.
+
+    When BeerSmith metadata is provided (supplier, lab, product_id, color_lovibond),
+    matching uses this structured data for more accurate results.
+
+    Match types returned:
+    - exact: Exact name match (score 100)
+    - yeast_id: Yeast product ID match (score 100)
+    - color: Crystal malt color match (score varies)
+    - contains/partial: Name substring match (score 75-85)
+    - lab_name: Same yeast lab + name similarity (score 80)
+    - fuzzy_name: Word overlap match (score varies)
+    - equivalent: Functionally equivalent yeast (score 40, requires confirmation)
+    - different_maltster: Similar malt from different supplier (score 30, requires confirmation)
 
     Args:
         ingredient_name: The ingredient name to match
         products: List of Grocy products
         stock: Optional stock data for availability info
         min_score: Minimum match score to consider (default 50)
+        supplier: BeerSmith grain supplier/maltster (optional)
+        origin: BeerSmith origin country (optional)
+        lab: BeerSmith yeast lab (optional)
+        product_id: BeerSmith yeast product ID (optional)
+        color_lovibond: BeerSmith grain color in Lovibond (optional)
 
     Returns:
         Dictionary with match result, including best_match and alternatives.
     """
-    substitutes = _find_ingredient_substitutes(ingredient_name, products, stock)
+    substitutes = _find_ingredient_substitutes(
+        ingredient_name,
+        products,
+        stock,
+        supplier=supplier,
+        lab=lab,
+        product_id=product_id,
+        color_lovibond=color_lovibond,
+    )
 
     # Filter by minimum score
     valid_matches = [s for s in substitutes if s["score"] >= min_score]
 
     if not valid_matches:
+        # Check if there are any lower-score suggestions (equivalents, different maltsters)
+        suggestions = [s for s in substitutes if s["score"] > 0]
         return {
             "found": False,
             "ingredient": ingredient_name,
             "best_match": None,
             "alternatives": [],
+            "suggestions": suggestions[:3] if suggestions else [],  # Low-score suggestions
         }
 
     best_match = valid_matches[0]
     alternatives = valid_matches[1:5]  # Top 4 alternatives
+
+    # Determine match quality
+    is_exact = best_match["match_type"] == "exact" and best_match["score"] == 100
+    is_yeast_id = best_match["match_type"] == "yeast_id" and best_match["score"] == 100
+    requires_confirmation = best_match["match_type"] in ["equivalent", "different_maltster"]
 
     return {
         "found": True,
         "ingredient": ingredient_name,
         "best_match": best_match,
         "alternatives": alternatives,
-        "is_exact": best_match["match_type"] == "exact" and best_match["score"] == 100,
+        "is_exact": is_exact or is_yeast_id,
+        "requires_confirmation": requires_confirmation,
     }
 
 
@@ -1395,16 +1959,26 @@ def register_tools(mcp: FastMCP) -> None:
         Create a new recipe with smart ingredient matching.
 
         Uses intelligent matching for brewing ingredients:
-        - Crystal/Caramel malts are matched by color (Lovibond/EBC)
-        - Other ingredients use fuzzy name matching
+        - Yeast: Matches by product ID (US-05, M47, WLP001) and lab
+        - Crystal/Caramel malts: Matches based on color (Lovibond/EBC)
+        - Branded malts: Only matches within same maltster (BESTMALZ, Simpsons, etc.)
+        - Other ingredients: Uses fuzzy name matching
         - Reports substitutes when exact match not found
 
         Args:
             name: Recipe name
             ingredients: List of ingredients, each with:
-                - name: Product name
-                - amount: Amount required
+                - name: Product name (required)
+                - amount: Amount required (default 1)
                 - note: Optional note
+
+                BeerSmith metadata (optional, improves matching accuracy):
+                - supplier: Grain supplier/maltster (e.g., "BESTMALZ", "Simpsons")
+                - origin: Ingredient origin country
+                - lab: Yeast lab (e.g., "Fermentis", "White Labs")
+                - product_id: Yeast product ID (e.g., "US-05", "WLP001")
+                - color: Grain color in Lovibond
+
             description: Recipe description
             servings: Number of servings (default 1)
             use_substitutes: If True, use substitute matches when exact not found (default True)
@@ -1441,12 +2015,24 @@ def register_tools(mcp: FastMCP) -> None:
             amount = ing.get("amount", 1)
             note = ing.get("note")
 
-            # Use smart matching
+            # Extract BeerSmith metadata for improved matching
+            supplier = ing.get("supplier")  # Grain maltster
+            origin = ing.get("origin")  # Ingredient origin
+            lab = ing.get("lab")  # Yeast lab
+            yeast_product_id = ing.get("product_id")  # Yeast product ID
+            color_lovibond = ing.get("color")  # Grain color in Lovibond
+
+            # Use smart matching with BeerSmith metadata
             match_result = await _smart_match_ingredient(
                 ing_name,
                 products,
                 stock,
                 min_score=min_match_score,
+                supplier=supplier,
+                origin=origin,
+                lab=lab,
+                product_id=yeast_product_id,
+                color_lovibond=color_lovibond,
             )
 
             if match_result["found"]:
@@ -1601,10 +2187,14 @@ def register_tools(mcp: FastMCP) -> None:
         """
         Find substitute products for a brewing ingredient.
 
-        For crystal/caramel malts, uses color matching (Lovibond/EBC).
-        For other ingredients, uses fuzzy name matching.
+        Matching strategies by ingredient type:
+        - Yeast: Matches by product ID (US-05, M47, WLP001), lab, or functional equivalents
+        - Crystal/caramel malts: Uses color matching (Lovibond/EBC)
+        - Branded malts: Only matches within same maltster (BESTMALZ, Simpsons, etc.)
+        - Other ingredients: Uses fuzzy name matching
 
         This is useful for:
+        - Finding equivalent yeasts (e.g., "US-05" matches "Safale US-05" or suggests "WLP001")
         - Finding equivalent malts based on color (e.g., "Crystal 60L" → "Crystal 150 EBC")
         - Identifying products you already have that could substitute
         - Recipe planning with available inventory
@@ -1622,9 +2212,12 @@ def register_tools(mcp: FastMCP) -> None:
         products = await client.get_products()
         stock = await client.get_stock() if include_stock else None
 
-        # Parse color info from ingredient name
-        color_info = _parse_malt_color(ingredient_name)
+        # Detect ingredient type
+        is_yeast = _is_yeast_product(ingredient_name)
         is_crystal = _is_crystal_malt(ingredient_name)
+        color_info = _parse_malt_color(ingredient_name) if not is_yeast else None
+        maltster = _extract_maltster(ingredient_name) if not is_yeast else None
+        yeast_info = _extract_yeast_id(ingredient_name) if is_yeast else None
 
         substitutes = _find_ingredient_substitutes(
             ingredient_name,
@@ -1638,10 +2231,20 @@ def register_tools(mcp: FastMCP) -> None:
 
         result = {
             "ingredient": ingredient_name,
-            "is_crystal_malt": is_crystal,
+            "ingredient_type": "yeast" if is_yeast else ("crystal_malt" if is_crystal else "malt" if maltster else "other"),
             "substitutes_found": len(valid_substitutes),
             "substitutes": valid_substitutes[:10],  # Top 10
         }
+
+        # Add yeast info if parsed
+        if yeast_info:
+            result["parsed_yeast"] = {
+                "id": yeast_info["id"],
+                "lab": yeast_info["lab"],
+            }
+            equivalents = _get_yeast_equivalents(yeast_info["normalized"])
+            if equivalents:
+                result["known_equivalents"] = equivalents
 
         # Add color info if parsed
         if color_info:
@@ -1651,21 +2254,57 @@ def register_tools(mcp: FastMCP) -> None:
                 "source": color_info["source"],
             }
 
-        # Add recommendation
+        # Add maltster info if detected
+        if maltster:
+            result["detected_maltster"] = maltster
+
+        # Add recommendation based on match type
         if valid_substitutes:
             best = valid_substitutes[0]
-            if best["match_type"] == "exact":
+            match_type = best["match_type"]
+
+            if match_type == "exact":
                 result["recommendation"] = f"Exact match found: {best['product_name']}"
-            elif best["match_type"] == "color":
+            elif match_type == "yeast_id":
+                result["recommendation"] = f"Yeast ID match: {best['product_name']} ({best['details'].get('matched_id', '?')})"
+            elif match_type == "equivalent":
+                result["recommendation"] = (
+                    f"Functional equivalent: {best['product_name']} - "
+                    f"equivalent to {best['details'].get('equivalent_to', '?')} (requires confirmation)"
+                )
+            elif match_type == "color":
                 result["recommendation"] = (
                     f"Color match: {best['product_name']} "
                     f"({best['details'].get('product_ebc_range', '?')} EBC, "
                     f"{best['details'].get('ebc_difference', '?')} EBC difference)"
                 )
+            elif match_type == "different_maltster":
+                result["recommendation"] = (
+                    f"Different maltster: {best['product_name']} "
+                    f"(from {best['details'].get('product_maltster', '?')}, "
+                    f"requested {best['details'].get('requested_maltster', '?')}) - requires confirmation"
+                )
             else:
                 result["recommendation"] = f"Best fuzzy match: {best['product_name']} (score: {best['score']:.0f})"
         else:
-            result["recommendation"] = "No suitable substitutes found"
+            # Check for low-score suggestions
+            suggestions = [s for s in substitutes if s["score"] > 0]
+            if suggestions:
+                sugg = suggestions[0]
+                if sugg["match_type"] == "equivalent":
+                    result["recommendation"] = (
+                        f"No direct match, but equivalent yeast available: {sugg['product_name']}"
+                    )
+                elif sugg["match_type"] == "different_maltster":
+                    result["recommendation"] = (
+                        f"No match from same maltster. Alternative from {sugg['details'].get('product_maltster', '?')}: "
+                        f"{sugg['product_name']}"
+                    )
+                else:
+                    result["recommendation"] = "No suitable substitutes found"
+                result["low_score_suggestions"] = suggestions[:3]
+            else:
+                result["recommendation"] = "No suitable substitutes found"
 
         return result
 

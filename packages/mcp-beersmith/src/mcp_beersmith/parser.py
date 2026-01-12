@@ -1101,48 +1101,85 @@ class BeerSmithParser:
 
             if mcp_table is not None:
                 # Found the MCP Created folder
-                # Find its Data element
+                # Find its Data element using XML - this is safer than string searching
                 data_elem = mcp_table.find('Data')
                 if data_elem is not None:
-                    # Convert data_elem back to string to find its position in original content
-                    # We need to find where to insert within this Data element
-                    data_start_tag = '<Data>'
-                    data_end_tag = '</Data>'
+                    # Use a unique marker pattern to find the MCP Created folder's Data element
+                    # The pattern is: <Name>MCP Created</Name> followed by specific Table metadata
+                    # then <Data> which should be DIRECTLY inside the Table (not nested in recipes)
 
-                    # Find the Data section for MCP Created table in the original content
-                    # Search for the pattern: <Name>MCP Created</Name>...<Data>
-                    table_name_pos = content.find('<Name>MCP Created</Name>')
-                    if table_name_pos > 0:
-                        # Find the <Data> tag after this table name
-                        data_start_pos = content.find('<Data>', table_name_pos)
-                        if data_start_pos > 0:
-                            # Now find the MATCHING </Data> for this <Data>
-                            # We need to count nested Data tags
-                            search_pos = data_start_pos + len('<Data>')
-                            depth = 1
-                            while depth > 0 and search_pos < len(content):
-                                next_open = content.find('<Data>', search_pos)
-                                next_close = content.find('</Data>', search_pos)
+                    # Find the Table element containing MCP Created by looking for the unique pattern:
+                    # <Name>MCP Created</Name>...</Allocinc><Data>
+                    # This pattern only appears in folder Tables, not in recipe internals
 
-                                if next_close == -1:
+                    mcp_pattern = r'<Name>MCP Created</Name>.*?<Allocinc>\d+</Allocinc>\s*<Data>'
+                    mcp_match = re.search(mcp_pattern, content, re.DOTALL)
+
+                    if mcp_match:
+                        # Found the folder's Data opening tag
+                        data_start_end = mcp_match.end()  # Position right after <Data>
+
+                        # Now find the closing </Data> for this specific Data element
+                        # The folder's Data element should only contain Recipe elements (or be empty)
+                        # Look for </Data> followed by <_TExpanded> which is the Table's structure
+
+                        # Search from after <Data> for the pattern </Data><_TExpanded> or </Data>\n<_TExpanded>
+                        search_region = content[data_start_end:]
+
+                        # The MCP Created folder's </Data> is followed by <_TExpanded>
+                        # We need to find the FIRST </Data> that's followed by <_TExpanded>
+                        # But we also need to skip any </Data> that's part of nested recipe structures
+
+                        # Use a more reliable approach: count Recipe open/close tags
+                        pos = 0
+                        recipe_depth = 0
+                        data_close_pos = None
+
+                        while pos < len(search_region):
+                            # Look for Recipe tags and Data close tags
+                            next_recipe_open = search_region.find('<Recipe>', pos)
+                            next_recipe_close = search_region.find('</Recipe>', pos)
+                            next_data_close = search_region.find('</Data>', pos)
+
+                            if next_data_close == -1:
+                                break
+
+                            # Find the earliest tag
+                            candidates = []
+                            if next_recipe_open != -1:
+                                candidates.append(('open', next_recipe_open))
+                            if next_recipe_close != -1:
+                                candidates.append(('close', next_recipe_close))
+                            if next_data_close != -1:
+                                candidates.append(('data_close', next_data_close))
+
+                            if not candidates:
+                                break
+
+                            candidates.sort(key=lambda x: x[1])
+                            tag_type, tag_pos = candidates[0]
+
+                            if tag_type == 'open':
+                                recipe_depth += 1
+                                pos = tag_pos + len('<Recipe>')
+                            elif tag_type == 'close':
+                                recipe_depth -= 1
+                                pos = tag_pos + len('</Recipe>')
+                            elif tag_type == 'data_close':
+                                if recipe_depth == 0:
+                                    # This </Data> is at the folder level, not inside a recipe
+                                    data_close_pos = data_start_end + tag_pos
                                     break
-
-                                if next_open != -1 and next_open < next_close:
-                                    depth += 1
-                                    search_pos = next_open + len('<Data>')
                                 else:
-                                    depth -= 1
-                                    if depth == 0:
-                                        # Found the matching </Data>
-                                        new_content = content[:next_close] + recipe_xml + content[next_close:]
-                                        break
-                                    search_pos = next_close + len('</Data>')
-                            else:
-                                raise ValueError("Could not find matching </Data> tag for MCP Created folder")
+                                    pos = tag_pos + len('</Data>')
+
+                        if data_close_pos is not None:
+                            # Insert recipe before the closing </Data>
+                            new_content = content[:data_close_pos] + recipe_xml + content[data_close_pos:]
                         else:
-                            raise ValueError("Could not find <Data> tag for MCP Created folder")
+                            raise ValueError("Could not find folder's closing </Data> tag")
                     else:
-                        raise ValueError("Could not find MCP Created folder in content")
+                        raise ValueError("Could not find MCP Created folder pattern in content")
                 else:
                     raise ValueError("MCP Created table has no Data element")
             else:

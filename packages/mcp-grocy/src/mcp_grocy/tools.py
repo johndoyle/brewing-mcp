@@ -489,7 +489,57 @@ MALT_TYPE_EQUIVALENTS = {
     # Victory/Biscuit style
     # "Victory Malt"
     "victory": {"victory"},
+    # Candi/Candy sugar (Belgian spelling variants)
+    # "Candi Sugar, Clear", "Candi Sugar, Dark"
+    "candi": {"candi", "candy"},
+    "candy": {"candi", "candy"},
+    # Honey
+    # "Honey"
+    "honey": {"honey", "honig", "miel"},
+    "honig": {"honey", "honig", "miel"},
+    "miel": {"honey", "honig", "miel"},
+    # Molasses/Treacle
+    # "Molasses"
+    "molasses": {"molasses", "treacle"},
+    "treacle": {"molasses", "treacle"},
+    # Color modifiers - Clear/Light are equivalent for sugars and extracts
+    # "Candi Sugar, Clear" = "Light Candy Sugar"
+    "clear": {"clear", "light", "pale", "blonde", "blond"},
+    "light": {"clear", "light", "pale", "blonde", "blond"},
+    "pale": {"clear", "light", "pale", "blonde", "blond"},
+    "blonde": {"clear", "light", "pale", "blonde", "blond"},
+    "blond": {"clear", "light", "pale", "blonde", "blond"},
+    # Dark color modifiers
+    "dark": {"dark", "noir", "black"},
+    "noir": {"dark", "noir", "black"},
+    # Amber/Medium color modifiers
+    "amber": {"amber", "medium"},
+    "medium": {"amber", "medium"},
 }
+
+
+def _tokenize_ingredient_name(name: str) -> set[str]:
+    """
+    Tokenize an ingredient name into a set of lowercase words.
+
+    Handles special characters commonly found in brewing ingredient names:
+    - Trademark symbols: ®, ™
+    - Parentheses and brackets: (), []
+    - Separators: -, /, –, —
+    - Other punctuation
+
+    Args:
+        name: Ingredient name to tokenize
+
+    Returns:
+        Set of lowercase words
+    """
+    # Replace special characters with spaces
+    cleaned = name.lower()
+    for char in ["®", "™", "(", ")", "[", "]", "-", "/", "–", "—", ",", ".", "'", '"']:
+        cleaned = cleaned.replace(char, " ")
+    # Split and filter empty strings
+    return {word for word in cleaned.split() if word}
 
 
 def _expand_malt_type_words(words: set[str]) -> set[str]:
@@ -961,13 +1011,13 @@ def _find_ingredient_substitutes(
                         continue  # Skip - incompatible malt categories
 
                     # Only suggest if there's some name similarity
-                    name_words = set(name_lower.replace("-", " ").replace("/", " ").split())
-                    product_words = set(product_name_lower.replace("-", " ").replace("/", " ").split())
-                    filler = {"malt", "malts", "the", "a", "an", "-", "/", "–", "type"}
+                    name_words = _tokenize_ingredient_name(ingredient_name)
+                    product_words = _tokenize_ingredient_name(product_name)
+                    filler = {"malt", "malts", "the", "a", "an", "type"}
                     name_words -= filler
                     product_words -= filler
                     # Remove maltster words
-                    maltster_words = set(ingredient_maltster.split()) | set(product_maltster.split())
+                    maltster_words = _tokenize_ingredient_name(ingredient_maltster) | _tokenize_ingredient_name(product_maltster)
                     name_words -= maltster_words
                     product_words -= maltster_words
 
@@ -984,13 +1034,25 @@ def _find_ingredient_substitutes(
                         is_core_malt_type = bool(overlap & set(MALT_TYPE_EQUIVALENTS.keys()))
                         both_crystal = ingredient_is_crystal and product_is_crystal
                         if len(overlap) >= 2 or (len(overlap) >= 1 and (is_core_malt_type or both_crystal)):
-                            match_info["score"] = 30  # Low score - different maltster
+                            # Score based on match quality:
+                            # - Core base malts (pilsner, vienna, munich) are interchangeable
+                            #   between maltsters, so score higher (55) to pass default min_score
+                            # - Crystal malts need more verification (45)
+                            # - Other specialty malts where maltster matters more (35)
+                            if is_core_malt_type and not both_crystal:
+                                score = 55  # Base malts - good substitute
+                            elif both_crystal:
+                                score = 45  # Crystal malts - decent substitute
+                            else:
+                                score = 35  # Other malts - needs verification
+
+                            match_info["score"] = score
                             match_info["match_type"] = "different_maltster"
                             match_info["details"] = {
                                 "requested_maltster": ingredient_maltster,
                                 "product_maltster": product_maltster,
                                 "matching_type": list(overlap),
-                                "warning": "Different maltster - manual verification recommended",
+                                "warning": "Different maltster - verify suitability",
                             }
                             substitutes.append(match_info)
                 continue
@@ -1076,16 +1138,16 @@ def _find_ingredient_substitutes(
                 continue
 
         # Word overlap matching with linguistic equivalents
-        name_words = set(name_lower.replace("-", " ").replace("/", " ").split())
-        product_words = set(product_name_lower.replace("-", " ").replace("/", " ").split())
+        name_words = _tokenize_ingredient_name(ingredient_name)
+        product_words = _tokenize_ingredient_name(product_name)
         # Also extract words from description for broader matching
-        if product_desc_lower:
-            desc_words = set(product_desc_lower.replace("-", " ").replace("/", " ").split())
+        if product_desc:
+            desc_words = _tokenize_ingredient_name(product_desc)
         else:
             desc_words = set()
 
         # Remove common filler words
-        filler_words = {"malt", "malts", "the", "a", "an", "-", "/", "–", "is", "for", "and", "with"}
+        filler_words = {"malt", "malts", "the", "a", "an", "is", "for", "and", "with"}
         name_words -= filler_words
         product_words -= filler_words
         desc_words -= filler_words
@@ -1093,10 +1155,10 @@ def _find_ingredient_substitutes(
         # Remove maltster brand words to prevent "BEST Pale Ale" matching "Simpsons Best Pale Ale"
         # because "best" appears in both but means different things
         if ingredient_maltster:
-            maltster_words = set(ingredient_maltster.split())
+            maltster_words = _tokenize_ingredient_name(ingredient_maltster)
             name_words -= maltster_words
         if product_maltster:
-            maltster_words = set(product_maltster.split())
+            maltster_words = _tokenize_ingredient_name(product_maltster)
             product_words -= maltster_words
             desc_words -= maltster_words
 

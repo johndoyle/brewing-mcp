@@ -382,6 +382,135 @@ def _is_same_maltster(name1: str, name2: str) -> bool:
     return True
 
 
+# ==================== Malt Type Linguistic Equivalents ====================
+
+# Linguistic equivalents for malt type names across languages and conventions.
+# Maps each term to all its equivalents (including itself).
+MALT_TYPE_EQUIVALENTS = {
+    # Pilsen/Pilsner (German: Pilsen, English: Pilsner)
+    # "BEST Pilsen", "Pilsner Malt", "German Pilsner"
+    "pilsen": {"pilsen", "pilsner", "pils"},
+    "pilsner": {"pilsen", "pilsner", "pils"},
+    "pils": {"pilsen", "pilsner", "pils"},
+    # Vienna (German: Wiener)
+    # "BEST Vienna", "Vienna Malt (Weyermann)"
+    "vienna": {"vienna", "wiener", "viennese"},
+    "wiener": {"vienna", "wiener", "viennese"},
+    "viennese": {"vienna", "wiener", "viennese"},
+    # Munich (German: Münchner)
+    # "BEST Munich", "Munich Malt", "Münchner Malt"
+    "munich": {"munich", "münchner", "munchen", "munchner"},
+    "münchner": {"munich", "münchner", "munchen", "munchner"},
+    "munchen": {"munich", "münchner", "munchen", "munchner"},
+    "munchner": {"munich", "münchner", "munchen", "munchner"},
+    # Pale/Pale Ale - common base malt
+    # "BEST Pale Ale", "Pale Ale Malt", "Pale Malt"
+    "pale": {"pale"},
+    # Wheat (German: Weizen)
+    # "BEST Wheat Malt", "Wheat Malt"
+    "wheat": {"wheat", "weizen"},
+    "weizen": {"wheat", "weizen"},
+    # Caramel/Crystal - specialty malts (NOT equivalent to base malts)
+    # Note: These share naming but CaraVienna ≠ Vienna
+    "caramel": {"caramel", "crystal", "cara"},
+    "crystal": {"caramel", "crystal", "cara"},
+    "cara": {"caramel", "crystal", "cara"},
+    # Chocolate malt
+    # "BEST Chocolate", "Chocolate Malt"
+    "chocolate": {"chocolate", "choco"},
+    "choco": {"chocolate", "choco"},
+    # Black/Patent malt (NOT same as Roasted Barley)
+    # "Black (Patent) Malt", "BEST Black Malt"
+    "black": {"black", "patent"},
+    "patent": {"black", "patent"},
+    # Roasted (separate from black - Roasted Barley is different)
+    # "BEST Roasted Barley", "Roasted Barley"
+    "roasted": {"roasted", "roast"},
+    "roast": {"roasted", "roast"},
+    # Melanoidin
+    # "BEST Melanoidin", "Melanoidin (Weyermann)"
+    "melanoidin": {"melanoidin", "melano"},
+    "melano": {"melanoidin", "melano"},
+    # Acidulated/Sour (German: Sauer)
+    # "BEST Acidulated Malt", "Acidulated (Weyermann)"
+    "acidulated": {"acidulated", "sauer", "sour", "acid"},
+    "sauer": {"acidulated", "sauer", "sour", "acid"},
+    "sour": {"acidulated", "sauer", "sour", "acid"},
+    "acid": {"acidulated", "sauer", "sour", "acid"},
+    # Smoked (German: Rauch)
+    # "BEST Smoked Malt", "Smoked Malt (Weyermann)"
+    "smoked": {"smoked", "rauch", "smoke"},
+    "rauch": {"smoked", "rauch", "smoke"},
+    "smoke": {"smoked", "rauch", "smoke"},
+    # Biscuit malt
+    # "BEST Biscuit", "Biscuit Malt"
+    "biscuit": {"biscuit", "biscotti"},
+    "biscotti": {"biscuit", "biscotti"},
+    # Amber malt
+    # "Amber Malt", "Amber Malt (Crisp)"
+    "amber": {"amber"},
+    # Brown malt
+    # "Brown Malt", "Brown Malt (Crisp)"
+    "brown": {"brown"},
+    # Rye malt
+    # "BEST Rye Malt", "Rye Malt"
+    "rye": {"rye", "roggen"},
+    "roggen": {"rye", "roggen"},
+    # Oat malt
+    # "BEST Oat Malt", "Oats, Malted"
+    "oat": {"oat", "oats", "hafer"},
+    "oats": {"oat", "oats", "hafer"},
+    "hafer": {"oat", "oats", "hafer"},
+    # Spelt (German: Dinkel)
+    # "BEST Spelt Malt", "CHÂTEAU SPELT"
+    "spelt": {"spelt", "dinkel"},
+    "dinkel": {"spelt", "dinkel"},
+    # Peated malt
+    # "BEST Peated Malt", "CHÂTEAU PEATED"
+    "peated": {"peated", "peat"},
+    "peat": {"peated", "peat"},
+    # Lager malt
+    # "Lager Malt", "Lager Malt (Simpsons)"
+    "lager": {"lager"},
+    # Aromatic malt
+    # "Aromatic Malt", "Aromatic Munich Malt"
+    "aromatic": {"aromatic"},
+    # Dextrin/Carapils (body/foam malts)
+    # "Cara-Pils/Dextrine", "Carapils Malt", "Dextrin Malt"
+    "dextrin": {"dextrin", "dextrine", "carapils"},
+    "dextrine": {"dextrin", "dextrine", "carapils"},
+    "carapils": {"dextrin", "dextrine", "carapils"},
+    # Carafa (Weyermann dehusked dark malts)
+    # "Carafa I", "Carafa II", "Carafa III"
+    "carafa": {"carafa"},
+    # Special B (Belgian dark crystal)
+    # "Special B Malt", "CHÂTEAU SPECIAL B"
+    "special": {"special"},
+    # Victory/Biscuit style
+    # "Victory Malt"
+    "victory": {"victory"},
+}
+
+
+def _expand_malt_type_words(words: set[str]) -> set[str]:
+    """
+    Expand a set of words to include all linguistic equivalents.
+
+    Args:
+        words: Set of lowercase words from an ingredient name
+
+    Returns:
+        Expanded set including all equivalent terms
+    """
+    expanded = set()
+    for word in words:
+        if word in MALT_TYPE_EQUIVALENTS:
+            expanded.update(MALT_TYPE_EQUIVALENTS[word])
+        else:
+            expanded.add(word)
+    return expanded
+
+
 # ==================== Yeast Matching Utilities ====================
 
 # Regex patterns for extracting yeast product IDs
@@ -824,10 +953,17 @@ def _find_ingredient_substitutes(
                     substitutes.append(match_info)
                 # Otherwise, add as a "different_maltster" suggestion with low score
                 elif ingredient_maltster and product_maltster:
+                    # Don't match crystal/cara malts with base malts
+                    # e.g., "Cara Vienna" is NOT a substitute for "Vienna Malt"
+                    ingredient_is_crystal = _is_crystal_malt(ingredient_name)
+                    product_is_crystal = _is_crystal_malt(product_name)
+                    if ingredient_is_crystal != product_is_crystal:
+                        continue  # Skip - incompatible malt categories
+
                     # Only suggest if there's some name similarity
                     name_words = set(name_lower.replace("-", " ").replace("/", " ").split())
                     product_words = set(product_name_lower.replace("-", " ").replace("/", " ").split())
-                    filler = {"malt", "malts", "the", "a", "an", "-", "/"}
+                    filler = {"malt", "malts", "the", "a", "an", "-", "/", "–", "type"}
                     name_words -= filler
                     product_words -= filler
                     # Remove maltster words
@@ -835,14 +971,25 @@ def _find_ingredient_substitutes(
                     name_words -= maltster_words
                     product_words -= maltster_words
 
-                    if name_words and product_words:
-                        overlap = len(name_words & product_words)
-                        if overlap >= 2:  # At least 2 words must match
+                    # Expand using linguistic equivalents (pilsen↔pilsner, vienna↔wiener, etc.)
+                    name_words_expanded = _expand_malt_type_words(name_words)
+                    product_words_expanded = _expand_malt_type_words(product_words)
+
+                    if name_words_expanded and product_words_expanded:
+                        overlap = name_words_expanded & product_words_expanded
+                        # For core malt types (single meaningful word like "Vienna", "Munich"),
+                        # allow matching with just 1 word if it's a recognized malt type.
+                        # Also allow single-word matches for crystal malts (e.g., "CaraVienna")
+                        # since they are more specific product types.
+                        is_core_malt_type = bool(overlap & set(MALT_TYPE_EQUIVALENTS.keys()))
+                        both_crystal = ingredient_is_crystal and product_is_crystal
+                        if len(overlap) >= 2 or (len(overlap) >= 1 and (is_core_malt_type or both_crystal)):
                             match_info["score"] = 30  # Low score - different maltster
                             match_info["match_type"] = "different_maltster"
                             match_info["details"] = {
                                 "requested_maltster": ingredient_maltster,
                                 "product_maltster": product_maltster,
+                                "matching_type": list(overlap),
                                 "warning": "Different maltster - manual verification recommended",
                             }
                             substitutes.append(match_info)
@@ -907,14 +1054,41 @@ def _find_ingredient_substitutes(
             substitutes.append(match_info)
             continue
 
-        # Word overlap matching
+        # Check product description for ingredient name match
+        # This helps when product name differs but description contains the exact term
+        # e.g., "Pilsner Malt – Bestmalz" description contains "BEST Pilsen Malt"
+        product_desc_lower = product_desc.lower() if product_desc else ""
+        if product_desc_lower and name_lower in product_desc_lower:
+            # Description contains the ingredient name
+            if ingredient_maltster:
+                # Verify maltster matches in description too
+                if ingredient_maltster in product_desc_lower or ingredient_maltster in product_name_lower:
+                    match_info["score"] = 80
+                    match_info["match_type"] = "description_match"
+                    match_info["details"]["matched_in"] = "product description"
+                    substitutes.append(match_info)
+                    continue
+            else:
+                match_info["score"] = 75
+                match_info["match_type"] = "description_match"
+                match_info["details"]["matched_in"] = "product description"
+                substitutes.append(match_info)
+                continue
+
+        # Word overlap matching with linguistic equivalents
         name_words = set(name_lower.replace("-", " ").replace("/", " ").split())
         product_words = set(product_name_lower.replace("-", " ").replace("/", " ").split())
+        # Also extract words from description for broader matching
+        if product_desc_lower:
+            desc_words = set(product_desc_lower.replace("-", " ").replace("/", " ").split())
+        else:
+            desc_words = set()
 
         # Remove common filler words
-        filler_words = {"malt", "malts", "the", "a", "an", "-", "/"}
+        filler_words = {"malt", "malts", "the", "a", "an", "-", "/", "–", "is", "for", "and", "with"}
         name_words -= filler_words
         product_words -= filler_words
+        desc_words -= filler_words
 
         # Remove maltster brand words to prevent "BEST Pale Ale" matching "Simpsons Best Pale Ale"
         # because "best" appears in both but means different things
@@ -924,16 +1098,30 @@ def _find_ingredient_substitutes(
         if product_maltster:
             maltster_words = set(product_maltster.split())
             product_words -= maltster_words
+            desc_words -= maltster_words
 
-        if name_words and product_words:
-            overlap = len(name_words & product_words)
-            total = len(name_words | product_words)
+        # Expand words to include linguistic equivalents (pilsen↔pilsner, munich↔münchner, etc.)
+        name_words_expanded = _expand_malt_type_words(name_words)
+        product_words_expanded = _expand_malt_type_words(product_words)
+        desc_words_expanded = _expand_malt_type_words(desc_words)
+
+        # Combine product name and description words for matching
+        all_product_words = product_words_expanded | desc_words_expanded
+
+        if name_words_expanded and all_product_words:
+            overlap = len(name_words_expanded & all_product_words)
+            total = len(name_words_expanded | product_words_expanded)  # Use product name only for total
             if overlap > 0:
                 word_score = (overlap / total) * 70  # Max 70 for word matching
                 if word_score >= 30:  # Minimum threshold
                     match_info["score"] = word_score
                     match_info["match_type"] = "word_overlap"
-                    match_info["details"]["matching_words"] = list(name_words & product_words)
+                    matching_words = list(name_words_expanded & all_product_words)
+                    # Also note if match was via linguistic equivalents
+                    original_overlap = name_words & product_words
+                    if not original_overlap and matching_words:
+                        match_info["details"]["equivalent_match"] = True
+                    match_info["details"]["matching_words"] = matching_words
                     substitutes.append(match_info)
 
     # Sort by score descending

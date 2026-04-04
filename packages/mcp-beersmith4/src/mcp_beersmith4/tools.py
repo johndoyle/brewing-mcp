@@ -7,6 +7,7 @@ not constrained by BS3 XML-era tools.
 from __future__ import annotations
 
 import json
+import time
 
 from fastmcp import FastMCP
 
@@ -100,7 +101,14 @@ def _build_embedded_profile_json(row: dict, schema_id: str) -> str:
         if k in _EMBED_EXCLUDE:
             continue
         key_json = json.dumps(k)
-        if isinstance(v, str):
+        if k == "steps":
+            # BeerSmith serialises mash steps as a raw (unescaped) JSON array
+            # embedded within a JSON string value.  Inner quotes are intentionally
+            # NOT escaped, matching BeerSmith's own proprietary format which the
+            # _fix_unescaped_json_array reader handles on the way back out.
+            step_val = v if isinstance(v, str) else "[]"
+            fragments.append(f'"steps":"{step_val}"')
+        elif isinstance(v, str):
             fragments.append(f"{key_json}:{json.dumps(v)}")
         else:
             fragments.append(f"{key_json}:{json.dumps(_stringify_for_beersmith(v))}")
@@ -734,12 +742,20 @@ def register_tools(mcp: FastMCP) -> None:
             '"F_G_BOIL_TIME":"60.0000000","F_G_PRICE":"1.5000000","F_G_CONVERT_GRAIN":""}'
         )
 
+        # F_R_WINE_COLOR controls the glass graphic shown in BeerSmith's UI.
+        # Beer types (Extract=0, PartialMash=1, AllGrain=2) use -1 for a beer
+        # glass; all other types default to 0 (wine-style glass).
+        wine_color = -1 if recipe_type in (0, 1, 2) else 0
+
         recipe_data = {
             "F_R_NAME": name,
             "F_R_TYPE": recipe_type,
             "F_R_BREWER": brewer,
             "F_R_NOTES": notes,
             "F_R_FOLDER_NAME": "MCP Created",
+            "F_R_DATE": int(time.time()),
+            "F_R_VERSION": 1.0,
+            "F_R_WINE_COLOR": wine_color,
         }
 
         try:

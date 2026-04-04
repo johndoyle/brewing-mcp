@@ -298,6 +298,7 @@ class RecipeRepository:
         mash_json: str = "{}",
         carb_json: str = "{}",
         age_json: str = "{}",
+        base_grain_json: str = "{}",
         ingredients_json: str = "[]",
         *,
         dry_run: bool = False,
@@ -323,7 +324,9 @@ class RecipeRepository:
                 "F_R_MASH": mash_json,
                 "F_R_CARB": carb_json,
                 "F_R_AGE": age_json,
+                "F_R_BASE_GRAIN": base_grain_json,
                 "Ingredients": ingredients_json,
+                "AgeData": "[]",
             }
         )
 

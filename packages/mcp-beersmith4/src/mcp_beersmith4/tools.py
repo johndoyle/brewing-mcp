@@ -87,13 +87,24 @@ def _build_embedded_profile_json(row: dict, schema_id: str) -> str:
     Produces ``{"_Schema_":"NNNN","F_X_...":"value",...}`` matching
     BeerSmith 4's own serialisation: ``_Schema_`` first, all numeric values
     as strings, no internal DB bookkeeping fields.
+
+    All string values (including columns like ``steps`` that contain a JSON
+    array as a string) are stored as escaped JSON strings, matching BeerSmith
+    4's own serialisation: ``"steps":"[...]"``.  Empty-string values are
+    stored as ``""``.
     """
-    out: dict = {"_Schema_": schema_id}
+    # Build as a list of raw key:value fragments so we can mix string and
+    # non-string JSON values correctly.
+    fragments: list[str] = [f'"_Schema_":{json.dumps(schema_id)}']
     for k, v in row.items():
         if k in _EMBED_EXCLUDE:
             continue
-        out[k] = _stringify_for_beersmith(v) if not isinstance(v, str) else (v if v is not None else "")
-    return json.dumps(out, separators=(",", ":"))
+        key_json = json.dumps(k)
+        if isinstance(v, str):
+            fragments.append(f"{key_json}:{json.dumps(v)}")
+        else:
+            fragments.append(f"{key_json}:{json.dumps(_stringify_for_beersmith(v))}")
+    return "{" + ",".join(fragments) + "}"
 
 
 def register_tools(mcp: FastMCP) -> None:
@@ -586,20 +597,26 @@ def register_tools(mcp: FastMCP) -> None:
         config = get_config()
         db = DatabaseManager(config)
         recipe_repo = RecipeRepository(db)
-        ingredient_repo = IngredientRepository(db)
 
         # Build embedded JSON for profiles from raw DB rows.
         # We query the raw table rows (not Pydantic models) so that every
         # column present in the native DB is included and _Schema_ is added,
         # matching BeerSmith 4's own serialisation format exactly.
-        equipment_json = "{}"
-        if equipment_name:
-            row = db.query_one(
-                "SELECT * FROM M_EQUIPMENT WHERE F_E_NAME = ? COLLATE NOCASE",
-                (equipment_name,),
-            )
-            if row:
-                equipment_json = _build_embedded_profile_json(row, _SCHEMA_EQUIPMENT)
+        # BeerSmith 4 crashes on startup if any profile blob is missing
+        # _Schema_, so we always fall back to the first available profile.
+        def _profile_row(table: str, name_col: str, name: str | None) -> dict | None:
+            if name:
+                row = db.query_one(
+                    f"SELECT * FROM {table} WHERE {name_col} = ? COLLATE NOCASE",  # noqa: S608
+                    (name,),
+                )
+                if row:
+                    return row
+            # Fall back to the first available profile in the table
+            return db.query_one(f"SELECT * FROM {table} ORDER BY _PERMID_ LIMIT 1")  # noqa: S608
+
+        equip_row = _profile_row("M_EQUIPMENT", "F_E_NAME", equipment_name)
+        equipment_json = _build_embedded_profile_json(equip_row, _SCHEMA_EQUIPMENT) if equip_row else "{}"
 
         style_json = "{}"
         if style_name:
@@ -610,51 +627,112 @@ def register_tools(mcp: FastMCP) -> None:
             if row:
                 style_json = _build_embedded_profile_json(row, _SCHEMA_STYLE)
 
-        mash_json = "{}"
-        if mash_profile_name:
-            row = db.query_one(
-                "SELECT * FROM M_MASH WHERE F_MH_NAME = ? COLLATE NOCASE",
-                (mash_profile_name,),
-            )
-            if row:
-                mash_json = _build_embedded_profile_json(row, _SCHEMA_MASH)
+        mash_row = _profile_row("M_MASH", "F_MH_NAME", mash_profile_name)
+        mash_json = _build_embedded_profile_json(mash_row, _SCHEMA_MASH) if mash_row else "{}"
 
-        # Build ingredients JSON array
-        ingredients: list[dict] = []
+        carb_row = db.query_one("SELECT * FROM M_CARB ORDER BY _PERMID_ LIMIT 1")
+        carb_json = _build_embedded_profile_json(carb_row, _SCHEMA_CARB) if carb_row else "{}"
+
+        age_row = db.query_one("SELECT * FROM M_AGE ORDER BY _PERMID_ LIMIT 1")
+        age_json = _build_embedded_profile_json(age_row, _SCHEMA_AGE) if age_row else "{}"
+
+        # Build ingredients JSON array from raw library rows so we get ALL
+        # native columns (Pydantic model omits F_G_USE_SET, F_G_ACID_PCT,
+        # F_G_LATE_EXTRACT, F_G_CONVERT_GRAIN etc. — BeerSmith asserts on them).
+        EXCLUDE_ING = _EMBED_EXCLUDE  # same set
+        ingredients: list[str] = []
         try:
-            for g in json.loads(grains_json):
-                lib_grain = ingredient_repo.get_grain(g.get("name", ""))
-                if lib_grain:
-                    d = json.loads(lib_grain.model_dump_json(by_alias=True))
-                    d["_Schema_"] = "7406"
-                    d["F_G_AMOUNT"] = g.get("amount_oz", 0)
-                    d["F_G_IN_RECIPE"] = 1
-                    ingredients.append(_stringify_for_beersmith(d))
+            for order, g in enumerate(json.loads(grains_json)):
+                row = db.query_one(
+                    "SELECT * FROM M_GRAIN WHERE F_G_NAME = ? COLLATE NOCASE",
+                    (g.get("name", ""),),
+                )
+                if row:
+                    amount = g.get("amount_oz", 0)
+                    frags = [f'"_Schema_":"7406"']
+                    for k, v in row.items():
+                        if k in EXCLUDE_ING:
+                            continue
+                        kj = json.dumps(k)
+                        if k == "F_G_AMOUNT":
+                            frags.append(f"{kj}:\"{amount:.7f}\"")
+                        elif k == "F_G_IN_RECIPE":
+                            frags.append(f"{kj}:\"1\"")
+                        elif k == "F_ORDER":
+                            frags.append(f"{kj}:\"{order}\"")
+                        elif isinstance(v, str):
+                            frags.append(f"{kj}:{json.dumps(v)}")
+                        else:
+                            frags.append(f"{kj}:{json.dumps(_stringify_for_beersmith(v))}")
+                    ingredients.append("{" + ",".join(frags) + "}")
 
-            for h in json.loads(hops_json):
-                lib_hop = ingredient_repo.get_hop(h.get("name", ""))
-                if lib_hop:
-                    d = json.loads(lib_hop.model_dump_json(by_alias=True))
-                    d["_Schema_"] = "7403"
-                    d["F_H_AMOUNT"] = h.get("amount_oz", 0)
-                    d["F_H_ALPHA"] = h.get("alpha", lib_hop.alpha)
-                    d["F_H_BOIL_TIME"] = h.get("time", 60)
-                    d["F_H_USE"] = h.get("use", 0)
-                    d["F_H_IN_RECIPE"] = 1
-                    ingredients.append(_stringify_for_beersmith(d))
+            for order, h in enumerate(json.loads(hops_json)):
+                row = db.query_one(
+                    "SELECT * FROM M_HOPS WHERE F_H_NAME = ? COLLATE NOCASE",
+                    (h.get("name", ""),),
+                )
+                if row:
+                    frags = ['"_Schema_":"7403"']
+                    for k, v in row.items():
+                        if k in EXCLUDE_ING:
+                            continue
+                        kj = json.dumps(k)
+                        if k == "F_H_AMOUNT":
+                            amt = h.get("amount_oz", 0)
+                            frags.append(f"{kj}:\"{float(amt):.7f}\"")
+                        elif k == "F_H_BOIL_TIME":
+                            t = h.get("time", 60)
+                            frags.append(f"{kj}:\"{float(t):.7f}\"")
+                        elif k == "F_H_USE":
+                            frags.append(f"{kj}:\"{h.get('use', 0)}\"")
+                        elif k == "F_H_IN_RECIPE":
+                            frags.append(f"{kj}:\"1\"")
+                        elif k == "F_ORDER":
+                            frags.append(f"{kj}:\"{order}\"")
+                        elif isinstance(v, str):
+                            frags.append(f"{kj}:{json.dumps(v)}")
+                        else:
+                            frags.append(f"{kj}:{json.dumps(_stringify_for_beersmith(v))}")
+                    ingredients.append("{" + ",".join(frags) + "}")
 
             if yeast_name:
-                lib_yeast = ingredient_repo.get_yeast(yeast_name)
-                if lib_yeast:
-                    d = json.loads(lib_yeast.model_dump_json(by_alias=True))
-                    d["_Schema_"] = "7426"
-                    d["F_Y_IN_RECIPE"] = 1
-                    ingredients.append(_stringify_for_beersmith(d))
+                row = db.query_one(
+                    "SELECT * FROM M_YEAST WHERE F_Y_NAME = ? COLLATE NOCASE",
+                    (yeast_name,),
+                )
+                if row:
+                    frags = ['"_Schema_":"7426"']
+                    for k, v in row.items():
+                        if k in EXCLUDE_ING:
+                            continue
+                        kj = json.dumps(k)
+                        if k == "F_Y_IN_RECIPE":
+                            frags.append(f"{kj}:\"1\"")
+                        elif isinstance(v, str):
+                            frags.append(f"{kj}:{json.dumps(v)}")
+                        else:
+                            frags.append(f"{kj}:{json.dumps(_stringify_for_beersmith(v))}")
+                    ingredients.append("{" + ",".join(frags) + "}")
 
         except json.JSONDecodeError as e:
             return {"error": f"Invalid JSON input: {e}"}
 
-        ingredients_json = json.dumps(ingredients, separators=(',', ':'))
+        ingredients_json = "[" + ",".join(ingredients) + "]"
+
+        # F_R_BASE_GRAIN is a fixed "Malt" efficiency-reference template required
+        # by BeerSmith 4 in every recipe.  It is identical across all native recipes.
+        base_grain_json = (
+            '{"_Schema_":"7406","F_G_NAME":"Malt","F_G_ORIGIN":"","F_G_SUPPLIER":"",'
+            '"F_G_TYPE":"0","F_G_USE":"0","F_G_USE_SET":"1","F_G_ACID_PCT":"0.0000000",'
+            '"F_G_IN_RECIPE":"0","F_G_INVENTORY":"0.0000000","F_G_AMOUNT":"16.0000000",'
+            '"F_G_COLOR":"3.0000000","F_G_YIELD":"75.0000000","F_G_LATE_EXTRACT":"0.0000000",'
+            '"F_G_PERCENT":"0.0000000","F_G_NOT_FERMENTABLE":"0","_CLOUD_STATE_":"0",'
+            '"F_ORDER":"0","F_G_COARSE_FINE_DIFF":"1.5000000","F_G_MOISTURE":"4.0000000",'
+            '"F_G_DIASTATIC_POWER":"120.0000000","F_G_PROTEIN":"11.7000000",'
+            '"F_G_IBU_GAL_PER_LB":"0.0000000","F_G_ADD_AFTER_BOIL":"0",'
+            '"F_G_RECOMMEND_MASH":"0","F_G_MAX_IN_BATCH":"100.0000000","F_G_NOTES":"",'
+            '"F_G_BOIL_TIME":"60.0000000","F_G_PRICE":"1.5000000","F_G_CONVERT_GRAIN":""}'
+        )
 
         recipe_data = {
             "F_R_NAME": name,
@@ -670,6 +748,9 @@ def register_tools(mcp: FastMCP) -> None:
                 equipment_json=equipment_json,
                 style_json=style_json,
                 mash_json=mash_json,
+                carb_json=carb_json,
+                age_json=age_json,
+                base_grain_json=base_grain_json,
                 ingredients_json=ingredients_json,
                 dry_run=dry_run,
             )

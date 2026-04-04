@@ -566,8 +566,8 @@ def register_tools(mcp: FastMCP) -> None:
                 if lib_grain:
                     d = json.loads(lib_grain.model_dump_json(by_alias=True))
                     d["_Schema_"] = "7406"
-                    d["F_G_AMOUNT"] = str(g.get("amount_oz", 0))
-                    d["F_G_IN_RECIPE"] = "1"
+                    d["F_G_AMOUNT"] = float(g.get("amount_oz", 0))
+                    d["F_G_IN_RECIPE"] = 1
                     ingredients.append(d)
 
             for h in json.loads(hops_json):
@@ -575,11 +575,11 @@ def register_tools(mcp: FastMCP) -> None:
                 if lib_hop:
                     d = json.loads(lib_hop.model_dump_json(by_alias=True))
                     d["_Schema_"] = "7403"
-                    d["F_H_AMOUNT"] = str(h.get("amount_oz", 0))
-                    d["F_H_ALPHA"] = str(h.get("alpha", lib_hop.alpha))
-                    d["F_H_BOIL_TIME"] = str(h.get("time", 60))
-                    d["F_H_USE"] = str(h.get("use", 0))
-                    d["F_H_IN_RECIPE"] = "1"
+                    d["F_H_AMOUNT"] = float(h.get("amount_oz", 0))
+                    d["F_H_ALPHA"] = float(h.get("alpha", lib_hop.alpha))
+                    d["F_H_BOIL_TIME"] = float(h.get("time", 60))
+                    d["F_H_USE"] = int(h.get("use", 0))
+                    d["F_H_IN_RECIPE"] = 1
                     ingredients.append(d)
 
             if yeast_name:
@@ -587,7 +587,7 @@ def register_tools(mcp: FastMCP) -> None:
                 if lib_yeast:
                     d = json.loads(lib_yeast.model_dump_json(by_alias=True))
                     d["_Schema_"] = "7426"
-                    d["F_Y_IN_RECIPE"] = "1"
+                    d["F_Y_IN_RECIPE"] = 1
                     ingredients.append(d)
 
         except json.JSONDecodeError as e:

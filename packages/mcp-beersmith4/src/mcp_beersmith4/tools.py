@@ -70,6 +70,32 @@ def _stringify_for_beersmith(obj: object) -> object:
     return obj
 
 
+# DB bookkeeping columns that must NOT appear in embedded profile JSON blobs
+_EMBED_EXCLUDE = frozenset({"_PERMID_", "_MOD_", "_CLOUDID_", "_EXTRA_"})
+
+# Schema IDs used by BeerSmith 4 to identify embedded JSON object types
+_SCHEMA_EQUIPMENT = "7430"
+_SCHEMA_STYLE     = "7428"
+_SCHEMA_MASH      = "7434"
+_SCHEMA_CARB      = "7478"
+_SCHEMA_AGE       = "7482"
+
+
+def _build_embedded_profile_json(row: dict, schema_id: str) -> str:
+    """Build a native-format embedded profile JSON from a raw DB row.
+
+    Produces ``{"_Schema_":"NNNN","F_X_...":"value",...}`` matching
+    BeerSmith 4's own serialisation: ``_Schema_`` first, all numeric values
+    as strings, no internal DB bookkeeping fields.
+    """
+    out: dict = {"_Schema_": schema_id}
+    for k, v in row.items():
+        if k in _EMBED_EXCLUDE:
+            continue
+        out[k] = _stringify_for_beersmith(v) if not isinstance(v, str) else (v if v is not None else "")
+    return json.dumps(out, separators=(",", ":"))
+
+
 def register_tools(mcp: FastMCP) -> None:
     """Register all BeerSmith 4 MCP tools."""
 
@@ -560,36 +586,38 @@ def register_tools(mcp: FastMCP) -> None:
         config = get_config()
         db = DatabaseManager(config)
         recipe_repo = RecipeRepository(db)
-        profile_repo = ProfileRepository(db)
         ingredient_repo = IngredientRepository(db)
 
-        # Build embedded JSON for profiles
+        # Build embedded JSON for profiles from raw DB rows.
+        # We query the raw table rows (not Pydantic models) so that every
+        # column present in the native DB is included and _Schema_ is added,
+        # matching BeerSmith 4's own serialisation format exactly.
         equipment_json = "{}"
         if equipment_name:
-            equip = profile_repo.get_equipment(equipment_name)
-            if equip:
-                equipment_json = json.dumps(
-                    _stringify_for_beersmith(json.loads(equip.model_dump_json(by_alias=True))),
-                    separators=(',', ':'),
-                )
+            row = db.query_one(
+                "SELECT * FROM M_EQUIPMENT WHERE F_E_NAME = ? COLLATE NOCASE",
+                (equipment_name,),
+            )
+            if row:
+                equipment_json = _build_embedded_profile_json(row, _SCHEMA_EQUIPMENT)
 
         style_json = "{}"
         if style_name:
-            sty = profile_repo.get_style(style_name)
-            if sty:
-                style_json = json.dumps(
-                    _stringify_for_beersmith(json.loads(sty.model_dump_json(by_alias=True))),
-                    separators=(',', ':'),
-                )
+            row = db.query_one(
+                "SELECT * FROM M_STYLE WHERE F_S_NAME = ? COLLATE NOCASE",
+                (style_name,),
+            )
+            if row:
+                style_json = _build_embedded_profile_json(row, _SCHEMA_STYLE)
 
         mash_json = "{}"
         if mash_profile_name:
-            mash = profile_repo.get_mash_profile(mash_profile_name)
-            if mash:
-                mash_json = json.dumps(
-                    _stringify_for_beersmith(json.loads(mash.model_dump_json(by_alias=True))),
-                    separators=(',', ':'),
-                )
+            row = db.query_one(
+                "SELECT * FROM M_MASH WHERE F_MH_NAME = ? COLLATE NOCASE",
+                (mash_profile_name,),
+            )
+            if row:
+                mash_json = _build_embedded_profile_json(row, _SCHEMA_MASH)
 
         # Build ingredients JSON array
         ingredients: list[dict] = []

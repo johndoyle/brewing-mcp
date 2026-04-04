@@ -48,3 +48,10 @@ run-grocy:
 
 run-brewfather:
 	uv run --package mcp-brewfather python -m mcp_brewfather
+
+run-beersmith4:
+	uv run --package mcp-beersmith4 python -m mcp_beersmith4
+
+# Run BS4 tests only
+test-bs4:
+	uv run pytest packages/mcp-beersmith4/tests/ -v --tb=short

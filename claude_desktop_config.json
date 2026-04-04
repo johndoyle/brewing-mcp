@@ -1,5 +1,22 @@
 {
   "mcpServers": {
+    "beersmith4": {
+      "command": "/Users/john/.local/bin/uv",
+      "args": [
+        "run",
+        "--directory",
+        "/Users/john/Development/brewing-mcp",
+        "--package",
+        "mcp-beersmith4",
+        "python",
+        "-m",
+        "mcp_beersmith4"
+      ],
+      "env": {
+        "BEERSMITH4_READ_ONLY": "true",
+        "PYTHONWARNINGS": "ignore"
+      }
+    },
     "beersmith": {
       "command": "/Users/john/.local/bin/uv",
       "args": [

@@ -17,6 +17,7 @@ keywords = ["mcp", "brewing", "beersmith", "grocy", "brewfather"]
 members = [
     "packages/brewing-common",
     "packages/mcp-beersmith",
+    "packages/mcp-beersmith4",
     "packages/mcp-grocy",
     "packages/mcp-brewfather",
 ]

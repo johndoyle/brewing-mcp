@@ -162,7 +162,7 @@ class Recipe(BaseModel):
     )
     fg: float | None = Field(
         default=None,
-        ge=1.0,
+        ge=0.980,
         description="Final gravity",
     )
     ibu: float | None = Field(
@@ -251,7 +251,7 @@ class Batch(BaseModel):
     brew_date: datetime | None = Field(default=None)
     actual_batch_size_l: float | None = Field(default=None, gt=0)
     actual_og: float | None = Field(default=None, ge=1.0)
-    actual_fg: float | None = Field(default=None, ge=1.0)
+    actual_fg: float | None = Field(default=None, ge=0.980)
     actual_abv: float | None = Field(default=None, ge=0)
 
     # Status

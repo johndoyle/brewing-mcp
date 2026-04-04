@@ -46,6 +46,30 @@ def _get_adapter() -> BeerSmith4Adapter:
     return BeerSmith4Adapter()
 
 
+def _stringify_for_beersmith(obj: object) -> object:
+    """Recursively convert all non-string primitives to strings.
+
+    BeerSmith 4 serialises its SQLite embedded JSON with every numeric value
+    stored as a JSON string (e.g. ``"F_G_AMOUNT":"134.1000000"``).  Writing
+    native JSON number types causes BeerSmith's C++ parser to corrupt the heap
+    and crash.  All data built by this server must pass through this function
+    before being written to the database.
+
+    Floats are formatted to 7 decimal places to match BeerSmith's own format.
+    """
+    if isinstance(obj, dict):
+        return {k: _stringify_for_beersmith(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_stringify_for_beersmith(v) for v in obj]
+    if isinstance(obj, bool):
+        return "1" if obj else "0"
+    if isinstance(obj, float):
+        return f"{obj:.7f}"
+    if isinstance(obj, int):
+        return str(obj)
+    return obj
+
+
 def register_tools(mcp: FastMCP) -> None:
     """Register all BeerSmith 4 MCP tools."""
 
@@ -544,19 +568,28 @@ def register_tools(mcp: FastMCP) -> None:
         if equipment_name:
             equip = profile_repo.get_equipment(equipment_name)
             if equip:
-                equipment_json = equip.model_dump_json(by_alias=True)
+                equipment_json = json.dumps(
+                    _stringify_for_beersmith(json.loads(equip.model_dump_json(by_alias=True))),
+                    separators=(',', ':'),
+                )
 
         style_json = "{}"
         if style_name:
             sty = profile_repo.get_style(style_name)
             if sty:
-                style_json = sty.model_dump_json(by_alias=True)
+                style_json = json.dumps(
+                    _stringify_for_beersmith(json.loads(sty.model_dump_json(by_alias=True))),
+                    separators=(',', ':'),
+                )
 
         mash_json = "{}"
         if mash_profile_name:
             mash = profile_repo.get_mash_profile(mash_profile_name)
             if mash:
-                mash_json = mash.model_dump_json(by_alias=True)
+                mash_json = json.dumps(
+                    _stringify_for_beersmith(json.loads(mash.model_dump_json(by_alias=True))),
+                    separators=(',', ':'),
+                )
 
         # Build ingredients JSON array
         ingredients: list[dict] = []
@@ -566,21 +599,21 @@ def register_tools(mcp: FastMCP) -> None:
                 if lib_grain:
                     d = json.loads(lib_grain.model_dump_json(by_alias=True))
                     d["_Schema_"] = "7406"
-                    d["F_G_AMOUNT"] = float(g.get("amount_oz", 0))
+                    d["F_G_AMOUNT"] = g.get("amount_oz", 0)
                     d["F_G_IN_RECIPE"] = 1
-                    ingredients.append(d)
+                    ingredients.append(_stringify_for_beersmith(d))
 
             for h in json.loads(hops_json):
                 lib_hop = ingredient_repo.get_hop(h.get("name", ""))
                 if lib_hop:
                     d = json.loads(lib_hop.model_dump_json(by_alias=True))
                     d["_Schema_"] = "7403"
-                    d["F_H_AMOUNT"] = float(h.get("amount_oz", 0))
-                    d["F_H_ALPHA"] = float(h.get("alpha", lib_hop.alpha))
-                    d["F_H_BOIL_TIME"] = float(h.get("time", 60))
-                    d["F_H_USE"] = int(h.get("use", 0))
+                    d["F_H_AMOUNT"] = h.get("amount_oz", 0)
+                    d["F_H_ALPHA"] = h.get("alpha", lib_hop.alpha)
+                    d["F_H_BOIL_TIME"] = h.get("time", 60)
+                    d["F_H_USE"] = h.get("use", 0)
                     d["F_H_IN_RECIPE"] = 1
-                    ingredients.append(d)
+                    ingredients.append(_stringify_for_beersmith(d))
 
             if yeast_name:
                 lib_yeast = ingredient_repo.get_yeast(yeast_name)
@@ -588,12 +621,12 @@ def register_tools(mcp: FastMCP) -> None:
                     d = json.loads(lib_yeast.model_dump_json(by_alias=True))
                     d["_Schema_"] = "7426"
                     d["F_Y_IN_RECIPE"] = 1
-                    ingredients.append(d)
+                    ingredients.append(_stringify_for_beersmith(d))
 
         except json.JSONDecodeError as e:
             return {"error": f"Invalid JSON input: {e}"}
 
-        ingredients_json = json.dumps(ingredients)
+        ingredients_json = json.dumps(ingredients, separators=(',', ':'))
 
         recipe_data = {
             "F_R_NAME": name,

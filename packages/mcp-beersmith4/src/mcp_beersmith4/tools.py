@@ -636,7 +636,22 @@ def register_tools(mcp: FastMCP) -> None:
                 style_json = _build_embedded_profile_json(row, _SCHEMA_STYLE)
 
         mash_row = _profile_row("M_MASH", "F_MH_NAME", mash_profile_name)
-        mash_json = _build_embedded_profile_json(mash_row, _SCHEMA_MASH) if mash_row else "{}"
+        if mash_row:
+            # BeerSmith always overrides F_MASH_39 to 1 when embedding a mash
+            # profile inside a recipe.  The M_MASH library stores 0 as a
+            # template default; leaving it as 0 causes BeerSmith to treat the
+            # profile as uninitialised and crash when the user tries to edit it.
+            mash_row["F_MASH_39"] = 1
+            # Populate tun parameters from the equipment profile so that mash
+            # infusion calculations (temperatures, volumes) are accurate.
+            if equip_row:
+                mash_row["F_MH_TUN_VOL"] = equip_row.get("F_E_MASH_VOL", mash_row.get("F_MH_TUN_VOL", 0.0))
+                mash_row["F_MH_TUN_MASS"] = equip_row.get("F_E_TUN_MASS", mash_row.get("F_MH_TUN_MASS", 0.0))
+                mash_row["F_MH_TUN_HC"] = equip_row.get("F_E_TUN_SPECIFIC_HEAT", mash_row.get("F_MH_TUN_HC", 0.0))
+                mash_row["F_MH_TUN_DEADSPACE"] = equip_row.get("F_E_TUN_DEADSPACE", mash_row.get("F_MH_TUN_DEADSPACE", 0.0))
+            mash_json = _build_embedded_profile_json(mash_row, _SCHEMA_MASH)
+        else:
+            mash_json = "{}"
 
         carb_row = db.query_one("SELECT * FROM M_CARB ORDER BY _PERMID_ LIMIT 1")
         carb_json = _build_embedded_profile_json(carb_row, _SCHEMA_CARB) if carb_row else "{}"

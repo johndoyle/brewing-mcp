@@ -52,3 +52,16 @@ class TestDatabaseManager:
         fp2 = db._schema_fp.capture()
         assert fp1 == fp2
         assert db._schema_fp.verify()
+
+    def test_dry_run_rolls_back(self, db: DatabaseManager):
+        """dry_run=True should execute SQL then rollback, leaving DB unchanged."""
+        original_count = len(db.query("SELECT * FROM M_GRAIN"))
+        with db.write_connection(dry_run=True) as conn:
+            conn.execute(
+                "INSERT INTO M_GRAIN (_PERMID_, F_G_NAME) VALUES (98, 'Dry Run Grain')"
+            )
+        # Row should NOT have been persisted
+        after_count = len(db.query("SELECT * FROM M_GRAIN"))
+        assert after_count == original_count
+        row = db.query_one("SELECT * FROM M_GRAIN WHERE _PERMID_ = ?", (98,))
+        assert row is None

@@ -73,8 +73,15 @@ class DatabaseManager:
             conn.close()
 
     @contextmanager
-    def write_connection(self) -> Generator[sqlite3.Connection, None, None]:
+    def write_connection(
+        self, *, dry_run: bool = False,
+    ) -> Generator[sqlite3.Connection, None, None]:
         """Open a writable connection with safety checks.
+
+        Args:
+            dry_run: If True, execute SQL within a transaction then rollback
+                     instead of committing.  Validates the write would succeed
+                     without persisting any changes.
 
         Raises:
             PermissionError: If config is read-only.
@@ -97,7 +104,10 @@ class DatabaseManager:
         conn.execute("PRAGMA foreign_keys=ON")
         try:
             yield conn
-            conn.commit()
+            if dry_run:
+                conn.rollback()
+            else:
+                conn.commit()
         except Exception:
             conn.rollback()
             raise

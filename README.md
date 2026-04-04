@@ -7,19 +7,20 @@ A modular MCP (Model Context Protocol) platform for brewing software integration
 ```text
 ┌─────────────────────────────────────────┐
 │           Claude / MCP Client           │
-└─────────────┬───────────┬───────────────┘
-              │           │           │
-     ┌────────▼──┐  ┌─────▼─────┐  ┌──▼────────┐
-     │ BeerSmith │  │ Brewfather│  │   Grocy   │
-     │    MCP    │  │    MCP    │  │    MCP    │
-     └────────┬──┘  └─────┬─────┘  └──┬────────┘
-              │           │           │
-     ┌────────▼───────────▼───────────▼────────┐
-     │       brewing-common (shared lib)       │
-     │  - Ingredient normalisation             │
-     │  - Unit conversion                      │
-     │  - Fuzzy matching utilities             │
-     └─────────────────────────────────────────┘
+└──┬──────────┬───────────┬───────────┬───┘
+   │          │           │           │
+┌──▼───────┐┌─▼────────┐┌▼─────────┐┌▼────────┐
+│BeerSmith ││BeerSmith ││Brewfather││  Grocy  │
+│  3 MCP   ││  4 MCP   ││   MCP   ││   MCP   │
+│  (XML)   ││ (SQLite) ││         ││         │
+└──┬───────┘└─┬────────┘└┬─────────┘└┬────────┘
+   │          │          │           │
+┌──▼──────────▼──────────▼───────────▼────────┐
+│       brewing-common (shared lib)           │
+│  - Ingredient normalisation                 │
+│  - Unit conversion                          │
+│  - Fuzzy matching utilities                 │
+└─────────────────────────────────────────────┘
 ```
 
 ## Packages
@@ -27,7 +28,8 @@ A modular MCP (Model Context Protocol) platform for brewing software integration
 | Package | Description | Status |
 | ------- | ----------- | ------ |
 | `brewing-common` | Shared library with models, units, and matching | ✅ Complete |
-| `mcp-beersmith` | BeerSmith recipe and ingredient integration | ✅ Complete (30 tools) |
+| `mcp-beersmith` | BeerSmith 3 recipe/ingredient integration (XML) | ✅ Complete (30 tools) |
+| `mcp-beersmith4` | BeerSmith 4 integration (SQLite, read/write) | ✅ Complete (14 tools) |
 | `mcp-grocy` | Grocy inventory and stock management | ✅ Complete (50 tools) |
 | `mcp-brewfather` | Brewfather recipe and batch tracking | ✅ Complete (25 tools) |
 

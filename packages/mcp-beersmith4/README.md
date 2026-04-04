@@ -97,4 +97,6 @@ The server looks for BeerSmith 4 data in these locations:
 - **Read-only by default** — writes require `BEERSMITH4_READ_ONLY=false`
 - **Automatic backups** — created before every write operation
 - **Schema fingerprinting** — detects schema drift from BeerSmith updates
+- **Dry-run mode** — pass `dry_run=true` to validate writes without persisting changes
 - **Field allowlist** — write operations only accept known safe fields
+- **Rollback on failure** — transactions are rolled back on any error

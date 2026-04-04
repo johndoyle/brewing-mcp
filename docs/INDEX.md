@@ -12,6 +12,8 @@ All documentation has been organized into the `docs/` directory for a cleaner ro
 | [PRICE_CONVERSION.md](PRICE_CONVERSION.md) | BeerSmith price storage format and conversions |
 | [PLAN.md](PLAN.md) | Implementation plan and architecture |
 | [CLEANUP_SUMMARY.md](CLEANUP_SUMMARY.md) | Summary of recent configuration cleanup |
+| [BEERSMITH4.md](BEERSMITH4.md) | BeerSmith 4 SQLite integration reference |
+| [BS3_TO_BS4_MIGRATION.md](BS3_TO_BS4_MIGRATION.md) | Migration guide: BeerSmith 3 → BeerSmith 4 |
 
 ## Quick Navigation
 
@@ -19,6 +21,11 @@ All documentation has been organized into the `docs/` directory for a cleaner ro
 1. Start with [../README.md](../README.md) for project overview
 2. Follow [CONFIG.md](CONFIG.md) to set up configuration
 3. Use [SETUP_GUIDE.md](SETUP_GUIDE.md) for environment setup
+
+### BeerSmith Integration
+- BeerSmith 3 (XML): See [../packages/mcp-beersmith/README.md](../packages/mcp-beersmith/README.md)
+- BeerSmith 4 (SQLite): See [BEERSMITH4.md](BEERSMITH4.md)
+- Migration: See [BS3_TO_BS4_MIGRATION.md](BS3_TO_BS4_MIGRATION.md)
 
 ### Understanding Price Conversions
 - [PRICE_CONVERSION.md](PRICE_CONVERSION.md) - How BeerSmith stores prices

@@ -120,6 +120,30 @@ class TestRecipeRepository:
         assert full is not None
         assert full.recipe.notes == "Updated notes"
 
+    def test_create_recipe_dry_run(self, recipe_repo: RecipeRepository):
+        """Dry run creates no persistent record."""
+        before = recipe_repo.list_recipes()
+        permid = recipe_repo.create_recipe(
+            recipe_data={"F_R_NAME": "Phantom Recipe", "F_R_TYPE": 2},
+            dry_run=True,
+        )
+        assert permid > 0
+        after = recipe_repo.list_recipes()
+        assert len(after) == len(before)
+        # Recipe should not be found
+        assert recipe_repo.get_recipe("Phantom Recipe") is None
+
+    def test_update_recipe_dry_run(self, recipe_repo: RecipeRepository):
+        """Dry run validates the update but leaves original intact."""
+        success = recipe_repo.update_recipe(
+            100, {"F_R_NOTES": "Dry run notes"}, dry_run=True
+        )
+        assert success
+        # Original should be unchanged
+        full = recipe_repo.get_recipe(100)
+        assert full is not None
+        assert full.recipe.notes != "Dry run notes"
+
 
 class TestIngredientRepository:
     def test_list_grains(self, ingredient_repo: IngredientRepository):

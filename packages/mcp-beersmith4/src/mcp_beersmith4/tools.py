@@ -511,6 +511,7 @@ def register_tools(mcp: FastMCP) -> None:
         yeast_name: str | None = None,
         brewer: str = "",
         notes: str = "",
+        dry_run: bool = False,
     ) -> dict:
         """Create a new recipe in BeerSmith 4.
 
@@ -528,6 +529,7 @@ def register_tools(mcp: FastMCP) -> None:
             yeast_name: Yeast name to add (optional).
             brewer: Brewer name (optional).
             notes: Recipe notes (optional).
+            dry_run: If true, validate the write without persisting changes.
 
         Returns dict with new recipe ID and confirmation.
         """
@@ -608,7 +610,16 @@ def register_tools(mcp: FastMCP) -> None:
                 style_json=style_json,
                 mash_json=mash_json,
                 ingredients_json=ingredients_json,
+                dry_run=dry_run,
             )
+            if dry_run:
+                return {
+                    "success": True,
+                    "dry_run": True,
+                    "id": permid,
+                    "name": name,
+                    "message": f"Dry run: recipe '{name}' would be created with ID {permid} (not persisted)",
+                }
             return {
                 "success": True,
                 "id": permid,
@@ -624,6 +635,7 @@ def register_tools(mcp: FastMCP) -> None:
     def bs4_update_recipe(
         name_or_id: str,
         updates_json: str,
+        dry_run: bool = False,
     ) -> dict:
         """Update an existing BeerSmith 4 recipe.
 
@@ -636,6 +648,7 @@ def register_tools(mcp: FastMCP) -> None:
                          Supported: F_R_NAME, F_R_BREWER, F_R_NOTES,
                          F_R_TYPE, Ingredients (full JSON array),
                          F_R_EQUIPMENT, F_R_STYLE, F_R_MASH (raw JSON).
+            dry_run: If true, validate the write without persisting changes.
 
         Returns confirmation dict.
         """
@@ -679,8 +692,16 @@ def register_tools(mcp: FastMCP) -> None:
             return {"error": f"Recipe '{name_or_id}' not found"}
 
         try:
-            success = repo.update_recipe(existing.recipe.permid, filtered)
+            success = repo.update_recipe(existing.recipe.permid, filtered, dry_run=dry_run)
             if success:
+                if dry_run:
+                    return {
+                        "success": True,
+                        "dry_run": True,
+                        "id": existing.recipe.permid,
+                        "updated_fields": list(filtered.keys()),
+                        "message": "Dry run: update validated but not persisted",
+                    }
                 return {
                     "success": True,
                     "id": existing.recipe.permid,

@@ -299,12 +299,18 @@ class RecipeRepository:
         carb_json: str = "{}",
         age_json: str = "{}",
         ingredients_json: str = "[]",
+        *,
+        dry_run: bool = False,
     ) -> int:
         """Insert a new recipe and return its _PERMID_.
 
-        Creates a pre-write backup automatically.
+        Creates a pre-write backup automatically (skipped in dry-run mode).
+
+        Args:
+            dry_run: If True, validate the write then rollback.
         """
-        self._db.create_backup()
+        if not dry_run:
+            self._db.create_backup()
         permid = self._db.next_permid("M_RECIPE")
         mod = str(int(time.time()))
 
@@ -325,7 +331,7 @@ class RecipeRepository:
         placeholders = ", ".join("?" for _ in recipe_data)
         sql = f"INSERT INTO M_RECIPE ({columns}) VALUES ({placeholders})"
 
-        with self._db.write_connection() as conn:
+        with self._db.write_connection(dry_run=dry_run) as conn:
             conn.execute(sql, tuple(recipe_data.values()))
 
         return permid
@@ -334,22 +340,25 @@ class RecipeRepository:
         self,
         permid: int,
         updates: dict[str, Any],
+        *,
+        dry_run: bool = False,
     ) -> bool:
         """Update an existing recipe.
 
-        Creates a pre-write backup automatically.
+        Creates a pre-write backup automatically (skipped in dry-run mode).
 
         Returns:
             True if a row was updated.
         """
-        self._db.create_backup()
+        if not dry_run:
+            self._db.create_backup()
         updates["_MOD_"] = str(int(time.time()))
 
         set_clause = ", ".join(f"[{k}] = ?" for k in updates)
         sql = f"UPDATE M_RECIPE SET {set_clause} WHERE _PERMID_ = ?"
         params = tuple(updates.values()) + (permid,)
 
-        with self._db.write_connection() as conn:
+        with self._db.write_connection(dry_run=dry_run) as conn:
             cur = conn.execute(sql, params)
             return cur.rowcount > 0
 

@@ -20,5 +20,8 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["src/mcp_beersmith4"]
 
+[project.scripts]
+mcp-beersmith4 = "mcp_beersmith4.__main__:main"
+
 [tool.uv.sources]
 brewing-common = { workspace = true }
